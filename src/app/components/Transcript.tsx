@@ -5,6 +5,8 @@ import ReactMarkdown from "react-markdown";
 import { TranscriptItem } from "@/app/types";
 import Image from "next/image";
 import { useTranscript } from "@/app/contexts/TranscriptContext";
+import { useGlobalFlag } from "@/app/contexts/GlobalFlagContext";
+import SurgicalScribe from "@/surgicalScribe/page";
 
 export interface TranscriptProps {
   userText: string;
@@ -19,17 +21,12 @@ function Transcript({
   onSendMessage,
   canSend,
 }: TranscriptProps) {
+  const { activeWebRtc } = useGlobalFlag();
   const { transcriptItems, toggleTranscriptItemExpand } = useTranscript();
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const [prevLogs, setPrevLogs] = useState<TranscriptItem[]>([]);
   const [justCopied, setJustCopied] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
-
-  function scrollToBottom() {
-    if (transcriptRef.current) {
-      transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
-    }
-  }
 
   useEffect(() => {
     const hasNewMessage = transcriptItems.length > prevLogs.length;
@@ -48,12 +45,21 @@ function Transcript({
     setPrevLogs(transcriptItems);
   }, [transcriptItems]);
 
-  // Autofocus on text box input on load
   useEffect(() => {
     if (canSend && inputRef.current) {
       inputRef.current.focus();
     }
   }, [canSend]);
+
+  function scrollToBottom() {
+    if (transcriptRef.current) {
+      transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
+    }
+  }
+
+  if (!activeWebRtc) {
+    return <SurgicalScribe />;
+  }
 
   const handleCopyTranscript = async () => {
     if (!transcriptRef.current) return;

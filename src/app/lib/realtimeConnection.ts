@@ -2,7 +2,8 @@ import { RefObject } from "react";
 
 export async function createRealtimeConnection(
   EPHEMERAL_KEY: string,
-  audioElement: RefObject<HTMLAudioElement | null>
+  audioElement: RefObject<HTMLAudioElement | null>,
+  micStream: MediaStream 
 ): Promise<{ pc: RTCPeerConnection; dc: RTCDataChannel }> {
   const pc = new RTCPeerConnection();
 
@@ -11,9 +12,11 @@ export async function createRealtimeConnection(
         audioElement.current.srcObject = e.streams[0];
     }
   };
-
-  const ms = await navigator.mediaDevices.getUserMedia({ audio: true });
-  pc.addTrack(ms.getTracks()[0]);
+  const track = micStream.getAudioTracks()[0];
+  if (micStream) {
+    const track = micStream.getAudioTracks()[0];
+    pc.addTrack(track);
+  }
 
   const dc = pc.createDataChannel("oai-events");
 

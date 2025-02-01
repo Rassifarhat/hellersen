@@ -18,6 +18,7 @@ import { AgentConfig, SessionStatus } from "@/app/types";
 import { useTranscript } from "@/app/contexts/TranscriptContext";
 import { useEvent } from "@/app/contexts/EventContext";
 import { useHandleServerEvent } from "./hooks/useHandleServerEvent";
+import { useGlobalFlag } from "./contexts/GlobalFlagContext";
 
 // Utilities
 import { createRealtimeConnection } from "./lib/realtimeConnection";
@@ -31,6 +32,7 @@ function App() {
   const { transcriptItems, addTranscriptMessage, addTranscriptBreadcrumb } =
     useTranscript();
   const { logClientEvent, logServerEvent } = useEvent();
+  const { activeWebRtc, toggleGlobalFlag, micStream } = useGlobalFlag();
 
   const [selectedAgentName, setSelectedAgentName] = useState<string>("");
   const [selectedAgentConfigSet, setSelectedAgentConfigSet] =
@@ -52,6 +54,11 @@ function App() {
     useState<boolean>(true);
 
   const sendClientEvent = (eventObj: any, eventNameSuffix = "") => {
+    if (!activeWebRtc) {
+      console.log("WebRTC is disabled, skipping event:", eventObj.type);
+      return;
+    }
+
     if (dcRef.current && dcRef.current.readyState === "open") {
       logClientEvent(eventObj, eventNameSuffix);
       dcRef.current.send(JSON.stringify(eventObj));
@@ -67,12 +74,14 @@ function App() {
     }
   };
 
-  const handleServerEventRef = useHandleServerEvent({
+  const handleServerEvent = useHandleServerEvent({
     setSessionStatus,
     selectedAgentName,
     selectedAgentConfigSet,
     sendClientEvent,
     setSelectedAgentName,
+    toggleGlobalFlag,
+    shouldProcessEvents: activeWebRtc,
   });
 
   useEffect(() => {
@@ -124,6 +133,29 @@ function App() {
     }
   }, [isPTTActive]);
 
+  useEffect(() => {
+    if (pcRef.current && pcRef.current.connectionState === 'connected') {
+      const senders = pcRef.current.getSenders();
+      if (!activeWebRtc) {
+        // Disable all tracks when activeWebRtc is false
+        senders.forEach((sender) => {
+          if (sender.track) {
+            sender.track.enabled = false;
+            console.log(`WebRTC ${sender.track.kind} track disabled`);
+          }
+        });
+      } else {
+        // Enable all tracks when activeWebRtc is true
+        senders.forEach((sender) => {
+          if (sender.track) {
+            sender.track.enabled = true;
+            console.log(`WebRTC ${sender.track.kind} track enabled`);
+          }
+        });
+      }
+    }
+  }, [activeWebRtc]);
+
   const fetchEphemeralKey = async (): Promise<string | null> => {
     logClientEvent({ url: "/session" }, "fetch_session_token_request");
     const tokenResponse = await fetch("/api/session");
@@ -141,7 +173,7 @@ function App() {
   };
 
   const connectToRealtime = async () => {
-    if (sessionStatus !== "DISCONNECTED") return;
+    if (sessionStatus !== "DISCONNECTED" || !micStream) return;
     setSessionStatus("CONNECTING");
 
     try {
@@ -157,7 +189,8 @@ function App() {
 
       const { pc, dc } = await createRealtimeConnection(
         EPHEMERAL_KEY,
-        audioElementRef
+        audioElementRef,
+        micStream
       );
       pcRef.current = pc;
       dcRef.current = dc;
@@ -172,7 +205,7 @@ function App() {
         logClientEvent({ error: err }, "data_channel.error");
       });
       dc.addEventListener("message", (e: MessageEvent) => {
-        handleServerEventRef.current(JSON.parse(e.data));
+        handleServerEvent(JSON.parse(e.data));
       });
 
       setDataChannel(dc);
@@ -236,9 +269,9 @@ function App() {
       ? null
       : {
           type: "server_vad",
-          threshold: 0.5,
+          threshold: 0.8,
           prefix_padding_ms: 300,
-          silence_duration_ms: 200,
+          silence_duration_ms: 500,
           create_response: true,
         };
 
@@ -313,6 +346,7 @@ function App() {
   };
 
   const handleTalkButtonDown = () => {
+    if (!activeWebRtc) return;
     if (sessionStatus !== "CONNECTED" || dataChannel?.readyState !== "open")
       return;
     cancelAssistantSpeech();
@@ -458,7 +492,7 @@ function App() {
                   onChange={handleSelectedAgentChange}
                   className="appearance-none border border-gray-300 rounded-lg text-base px-2 py-1 pr-8 cursor-pointer font-normal focus:outline-none"
                 >
-                  {selectedAgentConfigSet?.map(agent => (
+                  {selectedAgentConfigSet?.map((agent) => (
                     <option key={agent.name} value={agent.name}>
                       {agent.name}
                     </option>
@@ -496,7 +530,6 @@ function App() {
 
         <Events isExpanded={isEventsPaneExpanded} />
       </div>
-
       <BottomToolbar
         sessionStatus={sessionStatus}
         onToggleConnection={onToggleConnection}

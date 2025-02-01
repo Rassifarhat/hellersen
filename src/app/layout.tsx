@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { GlobalFlagProvider } from "@/app/contexts/GlobalFlagContext";
 
 export const metadata: Metadata = {
   title: "Realtime API Agents",
@@ -13,7 +14,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`antialiased`}>{children}</body>
+      <body className={`antialiased`}>
+        <GlobalFlagProvider>
+          {children}
+        </GlobalFlagProvider>
+      </body>
     </html>
   );
 }
