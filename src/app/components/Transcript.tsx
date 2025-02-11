@@ -75,7 +75,7 @@ function Transcript({
   };
 
   return (
-    <div className="flex flex-col flex-1 bg-white min-h-0 rounded-xl">
+    <div className="flex flex-col flex-1 bg-customGray min-h-0 rounded-xl">
       <div className="relative flex-1 min-h-0">
         <button
           onClick={handleCopyTranscript}
@@ -176,7 +176,7 @@ function Transcript({
               onSendMessage();
             }
           }}
-          className="flex-1 px-4 py-2 focus:outline-none"
+          className="flex-1 px-4 py-2 focus:outline-none bg-lightGray"
             placeholder="Type a message..."
           />
           <button

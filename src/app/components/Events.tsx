@@ -35,13 +35,13 @@ function Events({ isExpanded }: EventsProps) {
     <div
       className={
         (isExpanded ? "w-1/2 overflow-auto" : "w-0 overflow-hidden opacity-0") +
-        " transition-all rounded-xl duration-200 ease-in-out flex flex-col bg-white"
+        " transition-all rounded-xl duration-200 ease-in-out flex flex-col bg-customGray"
       }
       ref={eventLogsContainerRef}
     >
       {isExpanded && (
         <div>
-          <div className="font-semibold px-6 py-4 sticky top-0 z-10 text-base border-b bg-white">
+          <div className="font-semibold px-6 py-4 sticky top-0 z-10 text-base border-b ">
             Logs
           </div>
           <div>

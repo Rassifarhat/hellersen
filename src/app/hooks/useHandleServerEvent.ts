@@ -45,6 +45,7 @@ const selectedAgentNameRef = useRef(selectedAgentName);
 useEffect(() => {
   selectedAgentNameRef.current = selectedAgentName;
 }, [selectedAgentName]);
+
 const { setPatientData } = usePatientData();
   const handleFunctionCall = useCallback(
     async (functionCallParams: {
@@ -62,6 +63,7 @@ const { setPatientData } = usePatientData();
       if (currentAgent?.toolLogic?.[functionCallParams.name]) {
         const fn = currentAgent.toolLogic[functionCallParams.name];
         const fnResult = await fn(args, transcriptItems);
+
         if (functionCallParams.name === 'surgicalScribeTool') {
           console.log('🔄 Switching to Surgical Scribe display mode');
           // Add initial message to transcript
@@ -72,7 +74,17 @@ const { setPatientData } = usePatientData();
             console.error("No content found in surgicalScribeTool result");
           }
         }
-        
+        else if (functionCallParams.name === "updateSurgicalReportTool") {
+          console.log("🔄 Surgical Editor update received");
+          const updateText = args.updateText;
+          if (updateText) {
+            // Here you can choose either to replace or to append.
+            // Since the AI library handles history concatenation, sending the new update alone is sufficient.
+            setPatientData({ content: updateText });
+          } else {
+            console.error("No update text provided in updateSurgicalReportTool call");
+          }
+        } 
         
         addTranscriptBreadcrumb(
           `function call result: ${functionCallParams.name}`,
