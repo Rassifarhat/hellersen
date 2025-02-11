@@ -6,53 +6,64 @@ import { usePatientData } from "@/app/contexts/PatientDataContext";
 import Message from "@/app/components/message";
 
 export default function SurgicalScribePage() {
-  // Get patient data from context
   const { patientData } = usePatientData();
 
-  // Initialize the chat hook with our API endpoint and an explicit id
-  const { messages, handleSubmit, setInput, handleInputChange } = useChat({
+  // Initialize the chat hook with our API endpoint and an explicit id.
+  const { messages, input, setInput, handleInputChange, handleSubmit } = useChat({
     api: "/api/scribe",
+    id: "surgical-scribe",
   });
 
-  const scrollRef = useRef<HTMLDivElement>(null);
+  // References for form and scrolling.
   const formRef = useRef<HTMLFormElement>(null);
-  // This ref ensures we only submit once
-  const hasSubmitted = useRef(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  
+  // Use a ref to store the last submitted patient data.
+  const lastSubmitted = useRef<string | null>(null);
 
-  // Automatically trigger form submission once when patientData is available
+  // Whenever patientData changes (and is different from the last submission), trigger a new submission.
   useEffect(() => {
-    if (patientData?.content && !hasSubmitted.current) {
-      console.log("Submitting patient data via hidden form:", patientData.content);
-      // Update the chat hook input with the patient data
+    if (patientData?.content && patientData.content !== lastSubmitted.current) {
+      console.log("Submitting new patient data via hidden form:", patientData.content);
       setInput(patientData.content);
-      // Use a small timeout to allow state to update before submitting
+      // Use a short timeout to ensure state updates propagate.
       setTimeout(() => {
         formRef.current?.requestSubmit();
-        hasSubmitted.current = true;
+        lastSubmitted.current = patientData.content;
       }, 0);
     }
   }, [patientData?.content, setInput]);
 
-  // Auto-scroll when messages change
+  // Auto-scroll to bottom when messages update.
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   return (
-    <div className="fixed h-full w-full bg-black">
+    // Use "relative" positioning so that this container is limited to its parent's area.
+    <div className="relative h-full w-full bg-black">
       <div className="container h-full w-full flex flex-col py-8">
         <div className="flex-1 overflow-y-auto" ref={scrollRef}>
           {messages.map((message) => (
             <Message key={message.id} message={message} />
           ))}
         </div>
-        {/* Hidden form that mimics the official docs */}
-        <form onSubmit={handleSubmit} ref={formRef} className="hidden">
+        {/* Hidden form: rendered off-screen but still in the DOM for submission */}
+        <form
+          onSubmit={handleSubmit}
+          ref={formRef}
+          style={{
+            position: "absolute",
+            left: "-9999px",
+            opacity: 0,
+            pointerEvents: "none",
+          }}
+        >
           <input
-            value=""
+            name="input"
+            value={input}
             onChange={handleInputChange}
             placeholder="Hidden input"
-            name="input"
           />
         </form>
       </div>

@@ -522,7 +522,7 @@ function App() {
           }
         />
 
-<Dashboard />
+<Dashboard isEventsPaneExpanded={isEventsPaneExpanded}/>
       </div>
       <BottomToolbar
         sessionStatus={sessionStatus}
