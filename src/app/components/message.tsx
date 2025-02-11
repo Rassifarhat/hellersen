@@ -6,7 +6,7 @@ export default function Message({ message }: { message: MessageType }) {
   const { role, content } = message;
   if (role === "assistant") {
     return (
-      <div className="flex flex-col gap-3 p-6 whitespace-pre-wrap">
+      <div className="flex flex-col gap-3 p-6 whitespace-pre-wrap text-white">
         <div className="flex items-center gap-2">
           <Bot />
           Clinic Assistant:
@@ -16,9 +16,9 @@ export default function Message({ message }: { message: MessageType }) {
     );
   }
   return (
-    <Card className="whitespace-pre-wrap">
+    <Card className="whitespace-pre-wrap text-white">
       <CardHeader>
-        <div className="flex items-center gap-2 text-white">
+        <div className="flex items-center gap-2">
           <User size={36} />
           {content}
         </div>

@@ -28,7 +28,16 @@ export default function Voice({ onVoice, onToggleLoading, className }: VoiceProp
       return;
     }
 
-    const newMediaRecorder = new MediaRecorder(micStream);
+    if (!micStream) return;
+const recordingStream = new MediaStream(
+  micStream.getAudioTracks().map((track) => {
+    const cloned = track.clone();
+    // Ensure the cloned track is enabled for recording.
+    cloned.enabled = true;
+    return cloned;
+  })
+);
+const newMediaRecorder = new MediaRecorder(recordingStream);
 
     newMediaRecorder.onstart = () => {
       console.log("Recording started");
@@ -97,6 +106,7 @@ export default function Voice({ onVoice, onToggleLoading, className }: VoiceProp
 
   const startRecording = () => {
     if (!mediaRecorder || mediaRecorder.state === "recording" || activeWebRtc || !micStream) return;
+    
     try {
       mediaRecorder.start();
       setRecording(true);

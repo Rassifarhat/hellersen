@@ -1,16 +1,14 @@
-"use-client";
+"use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
 import { TranscriptItem } from "@/app/types";
 import Image from "next/image";
 import { useTranscript } from "@/app/contexts/TranscriptContext";
-import { useGlobalFlag } from "@/app/contexts/GlobalFlagContext";
-import SurgicalScribe from "@/surgicalScribe/page";
+import ReactMarkdown from "react-markdown";
 
 export interface TranscriptProps {
   userText: string;
-  setUserText: (val: string) => void;
+  setUserText: (text: string) => void;
   onSendMessage: () => void;
   canSend: boolean;
 }
@@ -21,7 +19,6 @@ function Transcript({
   onSendMessage,
   canSend,
 }: TranscriptProps) {
-  const { activeWebRtc } = useGlobalFlag();
   const { transcriptItems, toggleTranscriptItemExpand } = useTranscript();
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const [prevLogs, setPrevLogs] = useState<TranscriptItem[]>([]);
@@ -57,10 +54,6 @@ function Transcript({
     }
   }
 
-  if (!activeWebRtc) {
-    return <SurgicalScribe />;
-  }
-
   const handleCopyTranscript = async () => {
     if (!transcriptRef.current) return;
     try {
@@ -69,6 +62,15 @@ function Transcript({
       setTimeout(() => setJustCopied(false), 1500);
     } catch (error) {
       console.error("Failed to copy transcript:", error);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (canSend) {
+        onSendMessage();
+      }
     }
   };
 
@@ -144,8 +146,8 @@ function Transcript({
                         {JSON.stringify(data, null, 2)}
                       </pre>
                     </div>
-                  )}
-                </div>
+                )}
+              </div>
               );
             } else {
               // Fallback if type is neither MESSAGE nor BREADCRUMB
@@ -156,7 +158,7 @@ function Transcript({
                 >
                   Unknown item type: {type}{" "}
                   <span className="ml-2 text-xs">{timestamp}</span>
-                </div>
+          </div>
               );
             }
           })}
@@ -167,25 +169,25 @@ function Transcript({
         <input
           ref={inputRef}
           type="text"
-          value={userText}
-          onChange={(e) => setUserText(e.target.value)}
+            value={userText}
+            onChange={(e) => setUserText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && canSend) {
               onSendMessage();
             }
           }}
           className="flex-1 px-4 py-2 focus:outline-none"
-          placeholder="Type a message..."
-        />
-        <button
-          onClick={onSendMessage}
+            placeholder="Type a message..."
+          />
+          <button
+            onClick={onSendMessage}
           disabled={!canSend || !userText.trim()}
           className="bg-gray-900 text-white rounded-full px-2 py-2 disabled:opacity-50"
         >
           <Image src="arrow.svg" alt="Send" width={24} height={24} />
-        </button>
+          </button>
+        </div>
       </div>
-    </div>
   );
 }
 

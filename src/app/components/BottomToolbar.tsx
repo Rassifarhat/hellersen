@@ -1,5 +1,6 @@
 import React from "react";
 import { SessionStatus } from "@/app/types";
+import { useGlobalFlag } from "@/app/contexts/GlobalFlagContext";
 
 interface BottomToolbarProps {
   sessionStatus: SessionStatus;
@@ -30,6 +31,7 @@ function BottomToolbar({
 }: BottomToolbarProps) {
   const isConnected = sessionStatus === "CONNECTED";
   const isConnecting = sessionStatus === "CONNECTING";
+  const { activeWebRtc, toggleGlobalFlag } = useGlobalFlag();
 
   function getConnectionButtonLabel() {
     if (isConnected) return "Disconnect";
@@ -113,6 +115,10 @@ function BottomToolbar({
           Logs
         </label>
       </div>
+
+      <button onClick={toggleGlobalFlag}>
+        {activeWebRtc ? 'mute mic' : 'unmute mic'}
+      </button>
     </div>
   );
 }

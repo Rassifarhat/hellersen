@@ -8,11 +8,11 @@ import Image from "next/image";
 
 // UI components
 import Transcript from "./components/Transcript";
-import Events from "./components/Events";
 import BottomToolbar from "./components/BottomToolbar";
+import Dashboard from "./components/Dashboard";
 
 // Types
-import { AgentConfig, SessionStatus } from "@/app/types";
+import { AgentConfig, SessionStatus } from "@/app/types"; 
 
 // Context providers & hooks
 import { useTranscript } from "@/app/contexts/TranscriptContext";
@@ -55,10 +55,9 @@ function App() {
 
   const sendClientEvent = (eventObj: any, eventNameSuffix = "") => {
     if (!activeWebRtc) {
-      console.log("WebRTC is disabled, skipping event:", eventObj.type);
+      console.log('Media control paused due to inactive mic:', eventObj.type);
       return;
     }
-
     if (dcRef.current && dcRef.current.readyState === "open") {
       logClientEvent(eventObj, eventNameSuffix);
       dcRef.current.send(JSON.stringify(eventObj));
@@ -127,34 +126,27 @@ function App() {
   useEffect(() => {
     if (sessionStatus === "CONNECTED") {
       console.log(
-        `updatingSession, isPTTACtive=${isPTTActive} sessionStatus=${sessionStatus}`
+        `updatingSession, isPTTActive=${isPTTActive} sessionStatus=${sessionStatus}`
       );
       updateSession();
     }
   }, [isPTTActive]);
 
   useEffect(() => {
-    if (pcRef.current && pcRef.current.connectionState === 'connected') {
+    if (pcRef.current) {
       const senders = pcRef.current.getSenders();
-      if (!activeWebRtc) {
-        // Disable all tracks when activeWebRtc is false
-        senders.forEach((sender) => {
-          if (sender.track) {
-            sender.track.enabled = false;
-            console.log(`WebRTC ${sender.track.kind} track disabled`);
-          }
-        });
-      } else {
-        // Enable all tracks when activeWebRtc is true
-        senders.forEach((sender) => {
-          if (sender.track) {
-            sender.track.enabled = true;
-            console.log(`WebRTC ${sender.track.kind} track enabled`);
-          }
-        });
-      }
+      senders.forEach((sender) => {
+        if (sender.track) {
+          sender.track.enabled = activeWebRtc;
+          console.log(`WebRTC ${sender.track.kind} track ${activeWebRtc ? "enabled" : "disabled"}`);
+        }
+      });
     }
   }, [activeWebRtc]);
+
+
+
+  
 
   const fetchEphemeralKey = async (): Promise<string | null> => {
     logClientEvent({ url: "/session" }, "fetch_session_token_request");
@@ -270,8 +262,8 @@ function App() {
       : {
           type: "server_vad",
           threshold: 0.8,
-          prefix_padding_ms: 300,
-          silence_duration_ms: 500,
+          prefix_padding_ms: 200,
+          silence_duration_ms: 800,
           create_response: true,
         };
 
@@ -283,7 +275,7 @@ function App() {
       session: {
         modalities: ["text", "audio"],
         instructions,
-        voice: "coral",
+        voice: "sage",
         input_audio_format: "pcm16",
         output_audio_format: "pcm16",
         input_audio_transcription: { model: "whisper-1" },
@@ -295,7 +287,7 @@ function App() {
     sendClientEvent(sessionUpdateEvent);
 
     if (shouldTriggerResponse) {
-      sendSimulatedUserMessage("hi");
+      sendSimulatedUserMessage("hi, please talk reasonnably fast at all times ( like an efficient assistant) and throughout the conversation, go on now without comfirming this and with a quick introductory salulation, remember always you are a doctor assistant");
     }
   };
 
@@ -436,6 +428,8 @@ function App() {
   }, [isAudioPlaybackEnabled]);
 
   const agentSetKey = searchParams.get("agentConfig") || "default";
+  
+  
 
   return (
     <div className="text-base flex flex-col h-screen bg-gray-100 text-gray-800 relative">
@@ -528,7 +522,7 @@ function App() {
           }
         />
 
-        <Events isExpanded={isEventsPaneExpanded} />
+<Dashboard />
       </div>
       <BottomToolbar
         sessionStatus={sessionStatus}

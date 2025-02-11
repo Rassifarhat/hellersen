@@ -3,16 +3,25 @@
 
 import React, { createContext, useContext, useState, useEffect, FC, PropsWithChildren } from "react";
 
-type GlobalFlagContextValue = {
+interface GlobalFlagContextType {
   activeWebRtc: boolean;
+  displayMessages: boolean;
   toggleGlobalFlag: () => void;
+  setDisplayMessages: (value: boolean) => void;
   micStream: MediaStream | null;
 };
 
-const GlobalFlagContext = createContext<GlobalFlagContextValue | undefined>(undefined);
+const GlobalFlagContext = createContext<GlobalFlagContextType>({
+  activeWebRtc: true,
+  displayMessages: false,
+  toggleGlobalFlag: () => {},
+  setDisplayMessages: () => {},
+  micStream: null,
+});
 
 export const GlobalFlagProvider: FC<PropsWithChildren> = ({ children }) => {
   const [activeWebRtc, setActiveWebRtc] = useState(true);
+  const [displayMessages, setDisplayMessages] = useState(false);
   const [micStream, setMicStream] = useState<MediaStream | null>(null);
 
   const toggleGlobalFlag = () => {
@@ -36,7 +45,9 @@ export const GlobalFlagProvider: FC<PropsWithChildren> = ({ children }) => {
     <GlobalFlagContext.Provider
       value={{
         activeWebRtc,
+        displayMessages,
         toggleGlobalFlag,
+        setDisplayMessages,
         micStream,
       }}
     >

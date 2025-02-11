@@ -65,7 +65,7 @@ function Events({ isExpanded }: EventsProps) {
                         style={{ color: arrowInfo.color }}
                         className="ml-1 mr-2"
                       >
-                      {arrowInfo.symbol}
+                        {arrowInfo.symbol}
                       </span>
                       <span
                         className={

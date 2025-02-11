@@ -5,6 +5,7 @@ import { useTranscript } from "@/app/contexts/TranscriptContext";
 import { useEvent } from "@/app/contexts/EventContext";
 import { useRef, useCallback, useEffect } from "react";
 import { allAgentSets } from "@/app/agentConfigs";
+import { usePatientData } from "@/app/contexts/PatientDataContext";
 
 export interface UseHandleServerEventParams {
   setSessionStatus: (status: SessionStatus) => void;
@@ -36,7 +37,15 @@ export function useHandleServerEvent({
   } = useTranscript();
 
   const { logServerEvent } = useEvent();
-
+  
+  // Initialize useChat hook for scribe API
+  
+// NEW: Create a ref to store the latest selectedAgentName
+const selectedAgentNameRef = useRef(selectedAgentName);
+useEffect(() => {
+  selectedAgentNameRef.current = selectedAgentName;
+}, [selectedAgentName]);
+const { setPatientData } = usePatientData();
   const handleFunctionCall = useCallback(
     async (functionCallParams: {
       name: string;
@@ -44,16 +53,27 @@ export function useHandleServerEvent({
       arguments: string;
     }) => {
       const args = JSON.parse(functionCallParams.arguments);
-      console.log(args);
       const currentAgent = selectedAgentConfigSet?.find(
-        (a) => a.name === selectedAgentName
+        (a) => a.name === selectedAgentNameRef.current
       );
-      console.log(selectedAgentName, currentAgent);
+
       addTranscriptBreadcrumb(`function call: ${functionCallParams.name}`, args);
 
       if (currentAgent?.toolLogic?.[functionCallParams.name]) {
         const fn = currentAgent.toolLogic[functionCallParams.name];
         const fnResult = await fn(args, transcriptItems);
+        if (functionCallParams.name === 'surgicalScribeTool') {
+          console.log('🔄 Switching to Surgical Scribe display mode');
+          // Add initial message to transcript
+          const patientContent = fnResult.messages?.[0]?.content;
+          if (patientContent) {
+            setPatientData({ content: patientContent });
+          } else {
+            console.error("No content found in surgicalScribeTool result");
+          }
+        }
+        
+        
         addTranscriptBreadcrumb(
           `function call result: ${functionCallParams.name}`,
           fnResult
@@ -74,7 +94,6 @@ export function useHandleServerEvent({
           selectedAgentConfigSet?.find((a) => a.name === destinationAgent) || null;
         if (newAgentConfig) {
           setSelectedAgentName(destinationAgent);
-          toggleGlobalFlag();
         }
         const functionCallOutput = {
           destination_agent: destinationAgent,
@@ -118,6 +137,7 @@ export function useHandleServerEvent({
       toggleGlobalFlag,
       transcriptItems,
       addTranscriptBreadcrumb,
+      addTranscriptMessage
     ]
   );
 

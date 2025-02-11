@@ -1,21 +1,66 @@
-import { openai } from "@ai-sdk/openai";
-import { streamText } from "ai";
+// /api/scribe/route.ts
+import { openai } from '@ai-sdk/openai';
+import { streamText } from 'ai';
 
 export async function POST(req: Request) {
+  console.log("Incoming POST request to /api/scribe");
   try {
-    const { messages } = await req.json();
+    // Log the raw request details for debugging
+    console.log("Request method:", req.method);
+    console.log("Request headers:", [...req.headers.entries()]);
 
-    const systemPrompt=`
-  you assist in writing complex surgical reports. 
-  you act as an experienced orthopaedic surgeon. first you collect patient data. patient gender, age, diagnosis, brief history and risk factors, surgery title with details like anesthesia used and tourniquet. You do NOT proceed before collecting this data. you ask follow up questions to get all this data if they are not provided entirely. then you write a very detailed and very thorough and very extensive operative note like written by an experienced orthopedic surgeon. you write the operative note in one go without subtitles or subdivisions and without any starting info about the patient like patient name and doctor name, just the operative report. After the operative report is written i need : 1. pathological and normal findings during surgery. 2. a postoprative physician note. 3. a pre-operative and post-operative orders for the floor nurses.4. extensive education for the patient including psychological support.5. brief history leading to surgical decision.6. plan before the surgery including measurable and actionable goals.7.admission and post-operation diagnosis.8. extensive hospital course summary.9. discharge physical examination.10. procedure summary.11. condition at discharge.12. discharge medications.13. follow up plan.14. physical therapy plan.15. occupational therapy plan.16. social worker notes.17. discharge instructions.18. return to work/school plan.19. activity restrictions.20. wound care instructions.21. warning signs and symptoms.22. emergency contact information.23. follow up appointments.24. referrals.25. patient education materials.26. home care instructions.27. diet instructions.28. pain management plan.29. rehabilitation plan.30. expected recovery timeline.`
-  const stream = await streamText({
-    model: openai("gpt-4o"),
-    system: systemPrompt,
-    messages,
-  });
+    // Parse the request body and log its content
+    const bodyText = await req.text();
+    console.log("Raw request body:", bodyText);
 
+    let payload;
+    try {
+      payload = JSON.parse(bodyText);
+    } catch (jsonError) {
+      console.error("Failed to parse request JSON:", jsonError);
+      return new Response(JSON.stringify({ error: "Invalid JSON" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    
+    const { messages } = payload;
+    console.log("Parsed messages:", messages);
+
+    const systemPrompt = `
+You assist in writing complex surgical reports. 
+You act as an experienced orthopaedic surgeon. First, you collect patient data: gender, age, diagnosis, brief history, risk factors, and details such as anesthesia used and tourniquet information. Do NOT proceed before collecting all necessary data. Ask follow-up questions if the data is incomplete. Then, write a very detailed, thorough, and extensive operative note in one go without subtitles or subdivisions and without any initial identifiers (such as patient or doctor name). After the operative note is written, include:
+1. Pathological and normal findings during surgery.
+2. A postoperative physician note.
+3. Pre-operative and post-operative orders for the floor nurses.
+4. Extensive education for the patient including psychological support.
+5. A brief history leading to the surgical decision.
+6. A plan before surgery including measurable, actionable goals.
+7. Admission and post-operation diagnosis.
+8. Extensive hospital course summary.
+9. Discharge physical examination.
+10. Procedure summary.
+11. Condition at discharge.
+12. Health education and instructions at home.
+13. A list of reasons to visit the hospital immediately after discharge.
+    `;
+    console.log("Using system prompt:", systemPrompt);
+
+    console.time("streamText");
+    const stream = await streamText({
+      model: openai("gpt-4o"),
+      system: systemPrompt,
+      messages,
+    });
+    console.timeEnd("streamText");
+
+    console.log("streamText call succeeded, returning streaming response");
     return stream.toDataStreamResponse();
   } catch (error: any) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+    console.error("Error in /api/scribe:", error);
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 }
