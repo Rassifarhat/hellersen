@@ -34,7 +34,7 @@ function Events({ isExpanded }: EventsProps) {
   return (
     <div
       className={
-        (isExpanded ? "w-1/2 overflow-auto" : "w-0 overflow-hidden opacity-0") +
+        (isExpanded ? "w-full overflow-auto" : "w-0 overflow-hidden opacity-0") +
         " transition-all rounded-xl duration-200 ease-in-out flex flex-col bg-customGray"
       }
       ref={eventLogsContainerRef}

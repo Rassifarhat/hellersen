@@ -176,7 +176,7 @@ function Transcript({
               onSendMessage();
             }
           }}
-          className="flex-1 px-4 py-2 focus:outline-none bg-lightGray"
+          className="flex-1 px-4 py-2 focus:outline-none bg-customGray"
             placeholder="Type a message..."
           />
           <button

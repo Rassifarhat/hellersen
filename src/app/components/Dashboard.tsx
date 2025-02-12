@@ -19,7 +19,7 @@ export default function Dashboard({ isEventsPaneExpanded }: DashboardProps) {
   const { patientData } = usePatientData();
 
   return (
-    <div className="w-1/2 h-full overflow-auto rounded-xl transition-all duration-200 ease-in-out flex flex-col bg-white">
+    <div className="w-1/2 h-full overflow-auto rounded-xl transition-all duration-200 ease-in-out flex flex-col bg-customGray">
       {patientData ? (
         <SurgicalScribe />
       ) : (

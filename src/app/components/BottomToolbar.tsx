@@ -2,6 +2,7 @@ import React from "react";
 import { SessionStatus } from "@/app/types";
 import { useGlobalFlag } from "@/app/contexts/GlobalFlagContext";
 
+
 interface BottomToolbarProps {
   sessionStatus: SessionStatus;
   onToggleConnection: () => void;
@@ -102,6 +103,7 @@ function BottomToolbar({
           Audio playback
         </label>
       </div>
+      
 
       <div className="flex flex-row items-center gap-2">
         <input
@@ -120,6 +122,7 @@ function BottomToolbar({
         {activeWebRtc ? 'mute mic' : 'unmute mic'}
       </button>
     </div>
+    
   );
 }
 

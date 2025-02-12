@@ -6,6 +6,7 @@ import { useEvent } from "@/app/contexts/EventContext";
 import { useRef, useCallback, useEffect } from "react";
 import { allAgentSets } from "@/app/agentConfigs";
 import { usePatientData } from "@/app/contexts/PatientDataContext";
+import { useEmail } from "@/app/contexts/EmailContext";
 
 export interface UseHandleServerEventParams {
   setSessionStatus: (status: SessionStatus) => void;
@@ -38,15 +39,14 @@ export function useHandleServerEvent({
 
   const { logServerEvent } = useEvent();
   
-  // Initialize useChat hook for scribe API
-  
-// NEW: Create a ref to store the latest selectedAgentName
 const selectedAgentNameRef = useRef(selectedAgentName);
 useEffect(() => {
   selectedAgentNameRef.current = selectedAgentName;
 }, [selectedAgentName]);
 
 const { setPatientData } = usePatientData();
+const { setSendEmail } = useEmail();
+
   const handleFunctionCall = useCallback(
     async (functionCallParams: {
       name: string;
@@ -66,7 +66,6 @@ const { setPatientData } = usePatientData();
 
         if (functionCallParams.name === 'surgicalScribeTool') {
           console.log('🔄 Switching to Surgical Scribe display mode');
-          // Add initial message to transcript
           const patientContent = fnResult.messages?.[0]?.content;
           if (patientContent) {
             setPatientData({ content: patientContent });
@@ -78,9 +77,7 @@ const { setPatientData } = usePatientData();
           console.log("🔄 Surgical Editor update received");
           const updateText = args.updateText;
           if (updateText) {
-            // Here you can choose either to replace or to append.
-            // Since the AI library handles history concatenation, sending the new update alone is sufficient.
-            setPatientData({ content: updateText });
+              setPatientData({ content: updateText });
           } else {
             console.error("No update text provided in updateSurgicalReportTool call");
           }
@@ -185,6 +182,20 @@ const { setPatientData } = usePatientData();
 
           if (itemId && transcriptItems.some((item) => item.itemId === itemId)) {
             break;
+          }
+
+          // Check for email trigger JSON from surgicalEditor
+          if (role === "assistant") {
+            try {
+              const parsedResponse = JSON.parse(text);
+              if (parsedResponse.type === "string" && parsedResponse.action === "you have to send an email now") {
+                console.log("📧 Email trigger detected from surgicalEditor");
+                setSendEmail(true);
+                break;
+              }
+            } catch (error) {
+              // Not JSON, continue with normal message
+            }
           }
 
           if (itemId && role) {

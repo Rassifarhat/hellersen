@@ -445,7 +445,7 @@ function App() {
             />
           </div>
           <div>
-            Realtime API <span className="text-gray-500">Agents</span>
+            Emirates International Hospital <span className="text-gray-500">Digital Twin</span>
           </div>
         </div>
         <div className="flex items-center">
