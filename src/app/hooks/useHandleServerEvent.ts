@@ -6,7 +6,7 @@ import { useEvent } from "@/app/contexts/EventContext";
 import { useRef, useCallback, useEffect } from "react";
 import { allAgentSets } from "@/app/agentConfigs";
 import { usePatientData } from "@/app/contexts/PatientDataContext";
-import { useEmail } from "@/app/contexts/EmailContext";
+
 
 export interface UseHandleServerEventParams {
   setSessionStatus: (status: SessionStatus) => void;
@@ -45,7 +45,7 @@ useEffect(() => {
 }, [selectedAgentName]);
 
 const { setPatientData } = usePatientData();
-const { setSendEmail } = useEmail();
+
 
   const handleFunctionCall = useCallback(
     async (functionCallParams: {
@@ -183,21 +183,6 @@ const { setSendEmail } = useEmail();
           if (itemId && transcriptItems.some((item) => item.itemId === itemId)) {
             break;
           }
-
-          // Check for email trigger JSON from surgicalEditor
-          if (role === "assistant") {
-            try {
-              const parsedResponse = JSON.parse(text);
-              if (parsedResponse.type === "string" && parsedResponse.action === "you have to send an email now") {
-                console.log("📧 Email trigger detected from surgicalEditor");
-                setSendEmail(true);
-                break;
-              }
-            } catch (error) {
-              // Not JSON, continue with normal message
-            }
-          }
-
           if (itemId && role) {
             if (role === "user" && !text) {
               text = "[Transcribing...]";
