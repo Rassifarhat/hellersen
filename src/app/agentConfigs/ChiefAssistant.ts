@@ -47,7 +47,7 @@ const operativeReportAssistant: AgentConfig = {
 
   instructions: `
   ## Personality and Tone
-  - Calm, efficient, and attentive orthopedic manager
+  - start with a short one phrase like "let us write the operative report".
   - Fast-paced interaction (3x normal speed)
   - Professional yet conversational tone
   - Minimal filler words, clear articulation
@@ -206,6 +206,8 @@ const surgicalEditor: AgentConfig = {
   publicDescription: "Handles surgical report updates by calling the updateSurgicalReportTool tool and outputs structured email trigger when needed, finally transfer back to hellersenOrtho agent.",
   instructions: `
 ## Personality and Tone
+- ALWAYS remember you are a doctor assistant and remain professional. 
+- Fast-paced interaction (3x normal speed)
 - Professional, clear, and very brief
 - Fast-paced always
 - Always seeks explicit user confirmation for emails
@@ -214,7 +216,7 @@ const surgicalEditor: AgentConfig = {
 ## Primary Tasks
 1. Listen for and process voice requests to update the surgical report
 2. Handle email requests by outputting specific structured format
-3. Transfer control appropriately
+3. Transfer control right after the email trigger output
 
 ## Voice Update Handling
 - Listen carefully for additional voice updates concerning the surgical report 
@@ -222,6 +224,7 @@ const surgicalEditor: AgentConfig = {
 - Return the update text to update the patient data context
 - Be very fast-paced and brief with updates
 - Listen carefully for email sending requests and you can prompt the user to send an email 
+- ALWAYS remember you are a doctor assistant and remain professional.
 
 ## Email Handling
 1. When email sending is requested or confirmed by user, output EXACTLY this JSON structure:
@@ -232,18 +235,26 @@ const surgicalEditor: AgentConfig = {
 2. Transfer control back to hellersenOrtho IMMEDIATELY after outputting the structured email trigger
 3. NEVER output the email trigger string in any other format
 4. NEVER include any additional text with the JSON structure
+5. ALWAYS remember you are a doctor assistant and remain professional.
+
+## transfer back to hellersenOrtho
+- Transfer control back to hellersenOrtho IMMEDIATELY after outputting the structured email trigger
+- do not ask the user for confirmation, just transfer back to hellersenOrtho after the email trigger output
 
 ## Key Behaviors
 - Process voice updates quickly and efficiently
 - Output exact JSON structure when email sending decision is taken and nothing else
 - Transfer to hellersenOrtho right after email trigger output
 - Keep all communication clear and concise
+- ALWAYS remember you are a doctor assistant and remain professional.
 
 ## Strict Rules
+- MUST keep all communication professional as you are a doctor assistant
 - MUST output email trigger ONLY in the specified JSON format
 - MUST transfer to hellersenOrtho immediately after outputting email trigger
 - NEVER output the trigger string without the JSON structure
 - NEVER include additional text or explanations with the trigger
+- ALWAYS remember you are a doctor assistant and remain professional.
 `,
   tools: [
     {
@@ -279,8 +290,108 @@ const surgicalEditor: AgentConfig = {
   }
 };
 
-hellersenOrtho.downstreamAgents = [operativeReportAssistant]; 
+const interpreterCoordinator: AgentConfig = {
+  name: "interpreterCoordinator",
+  publicDescription: "Detects the language spoken in the voice input and sets the language flag.",
+  instructions: `
+## Role and Purpose:
+- You NEVER answer the user directly or participate in any conversation.
+- Your ONLY task is to call the tool "setLanguageFlag". you listen to the incoming voice input and determine the language being spoken then call the tool. ALWAYS.
+- When you are sufficiently confident (e.g. confidence ≥ 0.90) about the language, call the tool "setLanguageFlag" with a JSON object containing:
+   - "language": one of "english", "arabic", "hindi", "tagalog", "urdu", "german"
+   - "confidence": your confidence level as a decimal between 0 and 1.
+   - EVEN if the voice input does not seem to indicate it is asking about a specific language, still call the tool with "language" and "confidence"
+- Do not output any extra text— only the tool call is allowed.
+- Call the tool only once per voice input.
+  `,
+  tools: [
+    {
+      type: "function",
+      name: "setLanguageFlag",
+      description: `Sets the detected language flag in the system.
+The flag must be one of the following: "english", "arabic", "hindi", "tagalog", "urdu", "german".
+Only call this tool if your confidence in your detection is at least 0.90.`,
+      parameters: {
+        type: "object",
+        properties: {
+          language: {
+            type: "string",
+            enum: ["english", "arabic", "hindi", "tagalog", "urdu", "german"],
+            description: "The detected language."
+          },
+          confidence: {
+            type: "number",
+            description: "Confidence level (0 to 1) in the detected language."
+          }
+        },
+        required: ["language", "confidence"]
+      }
+    }
+  ],
+  toolLogic: {
+    setLanguageFlag: async (params: { language: string; confidence: number }) => {
+      // For debugging, log the tool call execution.
+      console.log(`InterpreterCoordinator: attempting to set language flag to ${params.language} with confidence ${params.confidence}`);
+      // In a real implementation, you might check the confidence here as well.
+      if (params.confidence < 0.9) {
+        console.warn("Confidence below threshold; not updating language flag.");
+        throw new Error("Confidence too low");
+      }
+      return {
+        messages: [{
+          role: "assistant",
+          content: `Language flag set to ${params.language} with confidence ${params.confidence}`
+        }]
+      };
+    }
+  }
+};
+const doctorToPatient: AgentConfig = {
+  name: "doctorToPatient",
+  publicDescription: "Interpreter that strictly translates voice input from English to French (doctor-to-patient).",
+  instructions: `
+## Role and Purpose:
+- You are a professional interpreter.
+- Your ONLY task is to translate the input text from English to French.
+- Do not add any personal commentary, opinions, or additional context.
+- Do NOT ask any clarifying questions or engage in conversation.
+- Provide a verbatim translation of the input into plain French.
+- Output exactly the translated text and nothing else.
+`,
+  tools: [],
+};
+
+// New agent: patientToDoctor interprets from French to English.
+const patientToDoctor: AgentConfig = {
+  name: "patientToDoctor",
+  publicDescription: "Interpreter that strictly translates voice input from French to English (patient-to-doctor).",
+  instructions: `
+## Role and Purpose:
+- You are a professional interpreter.
+- Your ONLY task is to translate the input text from French to English.
+- Do not add any personal commentary, opinions, or additional context.
+- Do NOT ask any clarifying questions or engage in conversation.
+- Provide a verbatim translation of the input into plain English.
+- Output exactly the translated text and nothing else.
+`,
+  tools: [],
+};
+
+// Set up downstream relationships as needed. In this example, the interpreterCoordinator delegates to both interpretation agents.
+interpreterCoordinator.downstreamAgents = [doctorToPatient, patientToDoctor];
+doctorToPatient.downstreamAgents = [interpreterCoordinator];
+patientToDoctor.downstreamAgents = [interpreterCoordinator];
+hellersenOrtho.downstreamAgents = [operativeReportAssistant, interpreterCoordinator]; 
 operativeReportAssistant.downstreamAgents = [surgicalEditor];
 surgicalEditor.downstreamAgents = [hellersenOrtho];
-const agents = injectTransferTools([hellersenOrtho, operativeReportAssistant, surgicalEditor]);
+
+
+const agents = injectTransferTools([hellersenOrtho, operativeReportAssistant, surgicalEditor, interpreterCoordinator, doctorToPatient,
+  patientToDoctor,]);
+
+export const allAgentSets = {
+  "Rassifarhat/hellersen": [hellersenOrtho, operativeReportAssistant, surgicalEditor, interpreterCoordinator, doctorToPatient,
+    patientToDoctor,],
+};
+
 export default agents;

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { GlobalFlagProvider } from "@/app/contexts/GlobalFlagContext";
 import { PatientDataProvider } from "./contexts/PatientDataContext";
-import { EmailProvider } from "./contexts/EmailContext";
+import { LanguageProvider } from './contexts/LanguageContext';
 
 export const metadata: Metadata = {
   title: "Realtime API Agents",
@@ -19,9 +19,9 @@ export default function RootLayout({
       <body className={`antialiased`}>
         <GlobalFlagProvider>
           <PatientDataProvider>
-            <EmailProvider>
+            <LanguageProvider>
               {children}
-            </EmailProvider>
+            </LanguageProvider>
           </PatientDataProvider>
         </GlobalFlagProvider>
       </body>
