@@ -1,5 +1,12 @@
 export type SessionStatus = "DISCONNECTED" | "CONNECTING" | "CONNECTED";
 
+export interface AudioBuffer {
+  chunks: Blob[];
+  addChunk: (chunk: Blob) => void;
+  clear: () => void;
+  getAudioBlob: () => Blob;
+}
+
 export interface ToolParameterProperty {
   type: string;
   description?: string;

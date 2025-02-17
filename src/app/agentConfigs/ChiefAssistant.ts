@@ -293,18 +293,20 @@ const surgicalEditor: AgentConfig = {
 
 const languageDetector: AgentConfig = {
   name: "languageDetector",
-  publicDescription: "Agent that detects the languages spoken by the doctor and patient, sets the global language context, and initiates parallel interpreter connections.",
+  publicDescription: "Agent that detects the languages spoken by the doctor and patient, sets the global language context, then initiates parallel connections, then finally transfers to interpreterCoordinator.",
   instructions: `
 Role and Purpose:
-  • Your primary job is to determine the languages spoken by the doctor and the patient.
-  • Prompt the user (if necessary) to confirm or provide the doctor's language and the patient's language.
-  • Once you have these two languages, call the tool "setLanguageContext" with the appropriate values.
-  • Immediately afterward, call the tool "startParallelAgents" to initiate three parallel WebRTC connections for the interpreter agents.
-  • Finally, transfer control simultaneously to the following agents:
-    • InterpreterCoordinator (handles language flag setting and routing)
-    • DoctorToPatient (translates from the doctor's language to the patient's language)
-    • PatientToDoctor (translates from the patient's language to the doctor's language)
-  • Do not provide any additional commentary; simply perform the detection and trigger the necessary tools.
+-start by asking about the doctor's language and patient's language. no greetings.
+- you remember this data and call the tool setLanguageContext with the doctor's and patient's languages.
+- then you call the tool startParallelAgents to enable parallel audio processing.
+- then finally you transfer to interpreterCoordinator
+
+Critical Rules:
+- Do not provide any greetings or extra commentary
+- Follow the order: get the information, call setLanguageContext, call startParallelAgents, transfer to interpreterCoordinator exactly
+- Only accept supported languages, you can prompt the user to repeat if they submit an unsupported language
+- Immediately call tools when conditions are met.
+- always yield control to interpreterCoordinator after tool startParallelAgents is called.
 `,
   tools: [
     {
@@ -331,20 +333,11 @@ Role and Purpose:
     {
       type: "function",
       name: "startParallelAgents",
-      description: "Initiates three parallel WebRTC connections for the interpreter agents: InterpreterCoordinator, DoctorToPatient, and PatientToDoctor.",
+      description: "Sets the parallelConnection flag to true to enable parallel audio processing.",
       parameters: {
         type: "object",
         properties: {
-          doctorLanguage: { 
-            type: "string", 
-            enum: ["english", "arabic", "hindi", "tagalog", "urdu", "german"],
-            description: "The language spoken by the doctor." 
-          },
-          patientLanguage: { 
-            type: "string", 
-            enum: ["english", "arabic", "hindi", "tagalog", "urdu", "german"],
-            description: "The language spoken by the patient." 
-          }
+         
         },
         required: ["doctorLanguage", "patientLanguage"]
       }
@@ -366,8 +359,9 @@ Role and Purpose:
       return {
         messages: [{
           role: "assistant",
-          content: "Parallel interpreter agents started"
-        }]
+          content: "Starting parallel connections"
+        }],
+        setParallelConnection: true
       };
     }
   }
@@ -461,7 +455,7 @@ const patientToDoctor: AgentConfig = {
 };
 
 // Set up downstream relationships after all agents are defined
-languageDetector.downstreamAgents = [interpreterCoordinator, doctorToPatient, patientToDoctor];
+languageDetector.downstreamAgents = [interpreterCoordinator];
 doctorToPatient.downstreamAgents = [hellersenOrtho];
 patientToDoctor.downstreamAgents = [hellersenOrtho];
 hellersenOrtho.downstreamAgents = [operativeReportAssistant, languageDetector];

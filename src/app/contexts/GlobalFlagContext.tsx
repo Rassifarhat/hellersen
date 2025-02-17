@@ -9,6 +9,10 @@ interface GlobalFlagContextType {
   toggleGlobalFlag: () => void;
   setDisplayMessages: (value: boolean) => void;
   micStream: MediaStream | null;
+  parallelConnection: boolean;
+  setParallelConnection: (value: boolean) => void;
+  spokenLanguage: string;
+  setSpokenLanguage: (lang: string) => void;
 };
 
 const GlobalFlagContext = createContext<GlobalFlagContextType>({
@@ -17,12 +21,18 @@ const GlobalFlagContext = createContext<GlobalFlagContextType>({
   toggleGlobalFlag: () => {},
   setDisplayMessages: () => {},
   micStream: null,
+  parallelConnection: false,
+  setParallelConnection: () => {},
+  spokenLanguage: "unknown",
+  setSpokenLanguage: () => {},
 });
 
 export const GlobalFlagProvider: FC<PropsWithChildren> = ({ children }) => {
   const [activeWebRtc, setActiveWebRtc] = useState(true);
   const [displayMessages, setDisplayMessages] = useState(false);
   const [micStream, setMicStream] = useState<MediaStream | null>(null);
+  const [parallelConnection, setParallelConnection] = useState(false);
+  const [spokenLanguage, setSpokenLanguage] = useState<string>("unknown");
 
   const toggleGlobalFlag = () => {
     setActiveWebRtc((prev) => !prev);
@@ -49,6 +59,10 @@ export const GlobalFlagProvider: FC<PropsWithChildren> = ({ children }) => {
         toggleGlobalFlag,
         setDisplayMessages,
         micStream,
+        parallelConnection,
+        setParallelConnection,
+        spokenLanguage,
+        setSpokenLanguage,
       }}
     >
       {children}
@@ -56,10 +70,10 @@ export const GlobalFlagProvider: FC<PropsWithChildren> = ({ children }) => {
   );
 };
 
-export const useGlobalFlag = () => {
+export function useGlobalFlag() {
   const context = useContext(GlobalFlagContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error("useGlobalFlag must be used within a GlobalFlagProvider");
   }
   return context;
-};
+}

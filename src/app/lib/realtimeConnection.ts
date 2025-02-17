@@ -3,16 +3,17 @@ import { RefObject } from "react";
 export async function createRealtimeConnection(
   EPHEMERAL_KEY: string,
   audioElement: RefObject<HTMLAudioElement | null>,
-  micStream: MediaStream 
+  micStream: MediaStream,
 ): Promise<{ pc: RTCPeerConnection; dc: RTCDataChannel }> {
   const pc = new RTCPeerConnection();
 
   pc.ontrack = (e) => {
+    // Skip audio playback if parallel connection is active (interpreter coordinator)
     if (audioElement.current) {
-        audioElement.current.srcObject = e.streams[0];
+      audioElement.current.srcObject = e.streams[0];
     }
   };
-  const track = micStream.getAudioTracks()[0];
+
   if (micStream) {
     const track = micStream.getAudioTracks()[0];
     pc.addTrack(track);
@@ -44,4 +45,4 @@ export async function createRealtimeConnection(
   await pc.setRemoteDescription(answer);
 
   return { pc, dc };
-} 
+}

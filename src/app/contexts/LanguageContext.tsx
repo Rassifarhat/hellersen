@@ -13,17 +13,32 @@ export enum Language {
 }
 
 interface LanguageContextType {
-  detectedLanguage: Language;
-  setDetectedLanguage: (lang: Language) => void;
+  doctorLanguage: Language;
+  patientLanguage: Language;
+  setDoctorLanguage: (lang: Language) => void;
+  setPatientLanguage: (lang: Language) => void;
+  setLanguageContext: (doctor: Language, patient: Language) => void;
 }
 
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [detectedLanguage, setDetectedLanguage] = useState<Language>(Language.UNKNOWN);
+  const [doctorLanguage, setDoctorLanguage] = useState<Language>(Language.UNKNOWN);
+  const [patientLanguage, setPatientLanguage] = useState<Language>(Language.UNKNOWN);
+
+  const setLanguageContext = (doctor: Language, patient: Language) => {
+    setDoctorLanguage(doctor);
+    setPatientLanguage(patient);
+  };
 
   return (
-    <LanguageContext.Provider value={{ detectedLanguage, setDetectedLanguage }}>
+    <LanguageContext.Provider value={{ 
+      doctorLanguage, 
+      patientLanguage, 
+      setDoctorLanguage, 
+      setPatientLanguage,
+      setLanguageContext 
+    }}>
       {children}
     </LanguageContext.Provider>
   );
@@ -31,7 +46,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
 
 export function useLanguage() {
   const context = useContext(LanguageContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useLanguage must be used within a LanguageProvider');
   }
   return context;
