@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState, RefObject, useCallback } from "react";
+import React, { useEffect, useRef, useState, RefObject, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { v4 as uuidv4 } from "uuid";
 
@@ -20,6 +20,8 @@ import { useEvent } from "@/app/contexts/EventContext";
 import { useHandleServerEvent } from "./hooks/useHandleServerEvent";
 import { useGlobalFlag } from "./contexts/GlobalFlagContext";
 import { useLanguage } from "./contexts/LanguageContext";
+import { useAudioConnection } from './hooks/useAudioConnection';
+import { useAudioRouting } from './hooks/useAudioRouting';
 
 // Utilities
 import { createRealtimeConnection } from "./lib/realtimeConnection";
@@ -34,388 +36,76 @@ interface AudioBuffer {
   getAudioBlob: () => Blob;
 }
 
-
-
 function App() {
   const searchParams = useSearchParams();
 
-  const { transcriptItems, addTranscriptMessage, addTranscriptBreadcrumb } =
-    useTranscript();
+  const { transcriptItems, addTranscriptMessage, addTranscriptBreadcrumb } = useTranscript();
   const { logClientEvent, logServerEvent } = useEvent();
   const { parallelConnection, micStream, activeWebRtc, toggleGlobalFlag, spokenLanguage } = useGlobalFlag();
   const { doctorLanguage, patientLanguage } = useLanguage();
 
   const [selectedAgentName, setSelectedAgentName] = useState<string>("");
-  const [selectedAgentConfigSet, setSelectedAgentConfigSet] =
-    useState<AgentConfig[] | null>(null);
+  const [selectedAgentConfigSet, setSelectedAgentConfigSet] = useState<AgentConfig[] | null>(null);
 
   const [dataChannel, setDataChannel] = useState<RTCDataChannel | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
-  const audioElementRef = useRef<HTMLAudioElement | null>(null);
-  const [sessionStatus, setSessionStatus] =
-    useState<SessionStatus>("DISCONNECTED");
+  const [sessionStatus, setSessionStatus] = useState<SessionStatus>("DISCONNECTED");
 
-  const [isEventsPaneExpanded, setIsEventsPaneExpanded] =
-    useState<boolean>(true);
+  const audioElement = useMemo(() => {
+    const audio = new Audio();
+    audio.autoplay = false;
+    return audio;
+  }, []);
+
+  const {
+    doctorToPatientBuffer,
+    patientToDoctorBuffer,
+    sessionStatusDoctorToPatient,
+    sessionStatusPatientToDoctor,
+    startParallelConnections,
+    cleanupConnections
+  } = useAudioConnection({
+    micStream,
+    doctorLanguage,
+    patientLanguage,
+    parallelConnection
+  });
+
+  const { routeAudioBuffer } = useAudioRouting({
+    spokenLanguage,
+    doctorLanguage,
+    patientLanguage,
+    parallelConnection,
+    doctorToPatientBuffer,
+    patientToDoctorBuffer,
+    audioElement
+  });
+
+  useEffect(() => {
+    if (parallelConnection && doctorLanguage && patientLanguage) {
+      startParallelConnections();
+    }
+  }, [parallelConnection, doctorLanguage, patientLanguage, startParallelConnections]);
+
+  useEffect(() => {
+    if (spokenLanguage && spokenLanguage !== "unknown") {
+      routeAudioBuffer();
+    }
+  }, [spokenLanguage, routeAudioBuffer]);
+
+  useEffect(() => {
+    if (!parallelConnection) {
+      cleanupConnections();
+    }
+  }, [parallelConnection, cleanupConnections]);
+
+  const [isEventsPaneExpanded, setIsEventsPaneExpanded] = useState<boolean>(true);
   const [userText, setUserText] = useState<string>("");
   const [isPTTActive, setIsPTTActive] = useState<boolean>(false);
   const [isPTTUserSpeaking, setIsPTTUserSpeaking] = useState<boolean>(false);
-  const [isAudioPlaybackEnabled, setIsAudioPlaybackEnabled] =
-    useState<boolean>(true);
-    
-    const pcDoctorToPatientRef = useRef<RTCPeerConnection | null>(null);
-    const dcDoctorToPatientRef = useRef<RTCDataChannel | null>(null);
-    const [sessionStatusDoctorToPatient, setSessionStatusDoctorToPatient] =
-    useState<SessionStatus>("DISCONNECTED");
-  const [sessionStatusPatientToDoctor, setSessionStatusPatientToDoctor] =
-    useState<SessionStatus>("DISCONNECTED");
-   
-    // New refs for patientToDoctor connection
-    const pcPatientToDoctorRef = useRef<RTCPeerConnection | null>(null);
-    const dcPatientToDoctorRef = useRef<RTCDataChannel | null>(null);
-    const [dataChannelDoctorToPatient, setDataChannelDoctorToPatient] = useState<RTCDataChannel | null>(null);
-const [dataChannelPatientToDoctor, setDataChannelPatientToDoctor] = useState<RTCDataChannel | null>(null);
+  const [isAudioPlaybackEnabled, setIsAudioPlaybackEnabled] = useState<boolean>(true);
 
-const doctorToPatientBuffer = useRef<AudioBuffer>({
-  chunks: [],
-  addChunk: function (chunk: Blob) {
-    this.chunks.push(chunk);
-  },
-  clear: function () {
-    this.chunks = [];
-  },
-  getAudioBlob: function () {
-    return new Blob(this.chunks, { type: "audio/webm" });
-  },
-});
-
-const patientToDoctorBuffer = useRef<AudioBuffer>({
-  chunks: [],
-  addChunk: function (chunk: Blob) {
-    this.chunks.push(chunk);
-  },
-  clear: function () {
-    this.chunks = [];
-  },
-  getAudioBlob: function () {
-    return new Blob(this.chunks, { type: "audio/webm" });
-  },
-});
-
-
-
-const connectionOutputBuffer = async (
-  sessionType: "doctorToPatient" | "patientToDoctor",
-  EPHEMERAL_KEY: string,
-  micStream: MediaStream,
-  buffer: AudioBuffer // Structured buffer object
-): Promise<{ pc: RTCPeerConnection; dc: RTCDataChannel }> => {
-
-  const pc = new RTCPeerConnection();
-
-  // Handle incoming audio: Store in buffer instead of direct playback
-  pc.ontrack = (e) => {
-    if (e.streams[0]) {
-      const stream = e.streams[0];
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: "audio/webm",
-      });
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          buffer.addChunk(event.data);
-          console.log(`[${sessionType}] Audio chunk added to buffer.`);
-        }
-      };
-
-      mediaRecorder.onstop = () => {
-        console.log(`[${sessionType}] MediaRecorder stopped. Finalizing buffer.`);
-      };
-
-      mediaRecorder.start(100); // Collect data in 100ms chunks
-
-      // Stop recording when track ends
-      stream.getTracks().forEach(track => {
-        track.onended = () => {
-          mediaRecorder.stop();
-        };
-      });
-    }
-  };
-
-  // Attach mic audio track
-  const track = micStream.getAudioTracks()[0];
-  if (track) pc.addTrack(track);
-
-  // Create DataChannel dynamically based on session type
-  const dc = pc.createDataChannel(sessionType);
-
-  // WebRTC SDP handshake with OpenAI
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-
-  const baseUrl = "https://api.openai.com/v1/realtime";
-  const model = "gpt-4o-realtime-preview-2024-12-17";
-
-  const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
-    method: "POST",
-    body: offer.sdp,
-    headers: {
-      Authorization: `Bearer ${EPHEMERAL_KEY}`,
-      "Content-Type": "application/sdp",
-    },
-  });
-
-  const answerSdp = await sdpResponse.text();
-  await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
-
-  return { pc, dc };
-};
-
-const connectAgentSession = async (
-  sessionType: "doctorToPatient" | "patientToDoctor",
-  bufferRef: RefObject<AudioBuffer>,
-  pcRef: RefObject<RTCPeerConnection | null>,
-  dcRef: RefObject<RTCDataChannel | null>,
-  setSessionStatusLocal: (status: SessionStatus) => void // Local, NOT global!
-) => {
-  if (pcRef.current) return; // Prevent duplicate connections
-
-  setSessionStatusLocal("CONNECTING"); // Only updates the agent session
-
-  try {
-    const EPHEMERAL_KEY = await fetchEphemeralKey();
-    if (!EPHEMERAL_KEY) return;
-
-    if (!micStream) {
-      console.error(`[${sessionType}] No microphone stream available`);
-      setSessionStatusLocal("DISCONNECTED");
-      return;
-    }
-
-    const { pc, dc } = await connectionOutputBuffer(sessionType, EPHEMERAL_KEY, micStream, bufferRef.current);
-
-    pcRef.current = pc;
-    dcRef.current = dc;
-
-    dc.addEventListener("open", () => {
-      console.log(`[${sessionType}] Data Channel Opened`);
-    });
-
-    dc.addEventListener("message", (e) => {
-      const event = JSON.parse(e.data);
-      if (event.type === "conversation.item.input_audio_transcription.completed") {
-        console.log(`[${sessionType}] Voice buffer ready`);
-      }
-    });
-
-    dc.addEventListener("close", () => {
-      console.log(`[${sessionType}] Data Channel Closed`);
-      setSessionStatusLocal("DISCONNECTED"); // Only affect local session status
-      pcRef.current = null;
-      dcRef.current = null;
-    });
-
-    setSessionStatusLocal("CONNECTED");
-  } catch (err) {
-    console.error(`[${sessionType}] Connection error:`, err);
-    setSessionStatusLocal("DISCONNECTED");
-  }
-};
-
-const startParallelConnections = useCallback(async () => {
-  if (!micStream) {
-    console.error("No microphone stream available for parallel connections");
-    return;
-  }
-
-  console.log("🔄 Starting parallel connections");
-  console.log("Doctor Language:", doctorLanguage);
-  console.log("Patient Language:", patientLanguage);
-
-  try {
-    // Start doctor-to-patient connection
-    if (sessionStatusDoctorToPatient === "DISCONNECTED") {
-      await connectAgentSession(
-        "doctorToPatient",
-        doctorToPatientBuffer,
-        pcDoctorToPatientRef,
-        dcDoctorToPatientRef,
-        setSessionStatusDoctorToPatient
-      );
-    }
-
-    // Start patient-to-doctor connection
-    if (sessionStatusPatientToDoctor === "DISCONNECTED") {
-      await connectAgentSession(
-        "patientToDoctor",
-        patientToDoctorBuffer,
-        pcPatientToDoctorRef,
-        dcPatientToDoctorRef,
-        setSessionStatusPatientToDoctor
-      );
-    }
-
-    console.log("✅ Parallel connections started successfully");
-  } catch (error) {
-    console.error("❌ Error starting parallel connections:", error);
-    // Cleanup on error
-    if (pcDoctorToPatientRef.current) {
-      pcDoctorToPatientRef.current.close();
-      pcDoctorToPatientRef.current = null;
-    }
-    if (pcPatientToDoctorRef.current) {
-      pcPatientToDoctorRef.current.close();
-      pcPatientToDoctorRef.current = null;
-    }
-    setSessionStatusDoctorToPatient("DISCONNECTED");
-    setSessionStatusPatientToDoctor("DISCONNECTED");
-  }
-}, [
-  micStream,
-  doctorLanguage,
-  patientLanguage,
-  sessionStatusDoctorToPatient,
-  sessionStatusPatientToDoctor,
-]);
-
-useEffect(() => {
-  if (selectedAgentName && sessionStatus === "DISCONNECTED") {
-    connectToRealtime();
-  }
-}, [selectedAgentName]);
-
-useEffect(() => {
-  if (pcRef.current) {
-    const senders = pcRef.current.getSenders();
-    senders.forEach((sender) => {
-      if (sender.track) {
-        sender.track.enabled = activeWebRtc;
-        console.log(`WebRTC ${sender.track.kind} track ${activeWebRtc ? "enabled" : "disabled"}`);
-      }
-    });
-  }
-}, [activeWebRtc]);
-
-
-
-// Effect to handle parallel connections
-useEffect(() => {
-  if (parallelConnection && doctorLanguage && patientLanguage) {
-    startParallelConnections();
-  }
-}, [parallelConnection, doctorLanguage, patientLanguage, startParallelConnections]);
-
-// Separate effect for audio routing
-
-
-const routeAudioBuffer = useCallback(() => {
-  if (!spokenLanguage || spokenLanguage === "unknown") {
-    console.log("❌ Cannot route audio: spoken language not detected");
-    return;
-  }
-
-  if (!doctorLanguage || !patientLanguage) {
-    console.log("❌ Cannot route audio: language context not set");
-    return;
-  }
-
-  if (!parallelConnection) {
-    console.log("❌ Cannot route audio: parallel connections not established");
-    return;
-  }
-
-  console.log("🔄 Routing audio based on language matching");
-  console.log("Spoken Language:", spokenLanguage);
-  console.log("Doctor Language:", doctorLanguage);
-  console.log("Patient Language:", patientLanguage);
-
-  if (!audioElementRef.current) {
-    console.error("❌ No audio element available for playback");
-    return;
-  }
-
-  try {
-    // If doctor is speaking (language matches doctor's language)
-    if (spokenLanguage.toLowerCase() === doctorLanguage?.toLowerCase()) {
-      console.log("👨‍⚕️ Doctor is speaking - using doctor-to-patient buffer");
-      const audioBlob = doctorToPatientBuffer.current.getAudioBlob();
-      const audioUrl = URL.createObjectURL(audioBlob);
-      audioElementRef.current.src = audioUrl;
-      audioElementRef.current.play();
-      
-      // Clean up URL after playback
-      audioElementRef.current.onended = () => {
-        URL.revokeObjectURL(audioUrl);
-      };
-    }
-    // If patient is speaking (language matches patient's language)
-    else if (spokenLanguage.toLowerCase() === patientLanguage?.toLowerCase()) {
-      console.log("👤 Patient is speaking - using patient-to-doctor buffer");
-      const audioBlob = patientToDoctorBuffer.current.getAudioBlob();
-      const audioUrl = URL.createObjectURL(audioBlob);
-      audioElementRef.current.src = audioUrl;
-      audioElementRef.current.play();
-      
-      // Clean up URL after playback
-      audioElementRef.current.onended = () => {
-        URL.revokeObjectURL(audioUrl);
-      };
-    } else {
-      console.log("❌ Spoken language doesn't match either party - discarding buffers");
-    }
-  } catch (error) {
-    console.error("❌ Error routing audio:", error);
-  } finally {
-    // Clear both buffers regardless of which one was used
-    console.log("🧹 Clearing audio buffers");
-    doctorToPatientBuffer.current.clear();
-    patientToDoctorBuffer.current.clear();
-  }
-}, [spokenLanguage, doctorLanguage, patientLanguage]);
-useEffect(() => {
-  if (spokenLanguage && spokenLanguage !== "unknown") {
-    routeAudioBuffer();
-  }
-}, [spokenLanguage, routeAudioBuffer]);
-// Effect to cleanup parallel connections when disabled
-useEffect(() => {
-  if (!parallelConnection) {
-    console.log("🔄 Cleaning up parallel connections");
-    
-    // Cleanup doctor-to-patient connection
-    if (pcDoctorToPatientRef.current) {
-      pcDoctorToPatientRef.current.close();
-      pcDoctorToPatientRef.current = null;
-    }
-    if (dcDoctorToPatientRef.current) {
-      dcDoctorToPatientRef.current.close();
-      dcDoctorToPatientRef.current = null;
-    }
-    setSessionStatusDoctorToPatient("DISCONNECTED");
-    
-    // Cleanup patient-to-doctor connection
-    if (pcPatientToDoctorRef.current) {
-      pcPatientToDoctorRef.current.close();
-      pcPatientToDoctorRef.current = null;
-    }
-    if (dcPatientToDoctorRef.current) {
-      dcPatientToDoctorRef.current.close();
-      dcPatientToDoctorRef.current = null;
-    }
-    setSessionStatusPatientToDoctor("DISCONNECTED");
-  }
-}, [parallelConnection]);
-
-useEffect(() => {
-  if (parallelConnection) {
-    startParallelConnections();
-  }
-}, [parallelConnection, micStream]);
-
-
-    
   const sendClientEvent = (eventObj: any, eventNameSuffix = "") => {
     if (!activeWebRtc) {
       console.log('Media control paused due to inactive mic:', eventObj.type);
@@ -507,7 +197,7 @@ useEffect(() => {
     }
   }, [activeWebRtc]);
 
-const fetchEphemeralKey = async (): Promise<string | null> => {
+  const fetchEphemeralKey = async (): Promise<string | null> => {
   logClientEvent({ url: "/session" }, "fetch_session_token_request");
   const tokenResponse = await fetch("/api/session");
   const data = await tokenResponse.json();
@@ -533,14 +223,11 @@ const connectToRealtime = async () => {
       return;
     }
 
-    if (!audioElementRef.current) {
-      audioElementRef.current = document.createElement("audio");
-    }
-    audioElementRef.current.autoplay = isAudioPlaybackEnabled;
+    audioElement.autoplay = isAudioPlaybackEnabled;
 
     const { pc, dc } = await createRealtimeConnection(
       EPHEMERAL_KEY,
-      audioElementRef,
+      audioElement,
       micStream
     );
     pcRef.current = pc;
@@ -560,233 +247,240 @@ const connectToRealtime = async () => {
     });
 
     setDataChannel(dc);
+    setSessionStatus("CONNECTED");
   } catch (err) {
     console.error("Error connecting to realtime:", err);
     setSessionStatus("DISCONNECTED");
   }
 };
 
-const disconnectFromRealtime = () => {
-  if (pcRef.current) {
-    pcRef.current.getSenders().forEach((sender) => {
-      if (sender.track) {
-        sender.track.stop();
+  useEffect(() => {
+    if (audioElement) {
+      audioElement.autoplay = isAudioPlaybackEnabled;
+    }
+  }, [audioElement, isAudioPlaybackEnabled]);
+
+  useEffect(() => {
+    if (audioElement) {
+      if (isAudioPlaybackEnabled) {
+        audioElement.play().catch((err) => {
+          console.warn("Autoplay may be blocked by browser:", err);
+        });
+      } else {
+        audioElement.pause();
       }
-    });
+    }
+  }, [audioElement, isAudioPlaybackEnabled]);
 
-    pcRef.current.close();
-    pcRef.current = null;
-  }
-  setDataChannel(null);
-  setSessionStatus("DISCONNECTED");
-  setIsPTTUserSpeaking(false);
+  const disconnectFromRealtime = () => {
+    if (pcRef.current) {
+      pcRef.current.getSenders().forEach((sender) => {
+        if (sender.track) {
+          sender.track.stop();
+        }
+      });
 
-  logClientEvent({}, "disconnected");
-};
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+    setDataChannel(null);
+    setSessionStatus("DISCONNECTED");
+    setIsPTTUserSpeaking(false);
 
-const sendSimulatedUserMessage = (text: string) => {
-  const id = uuidv4().slice(0, 32);
-  addTranscriptMessage(id, "user", text, true);
-
-  sendClientEvent(
-    {
-      type: "conversation.item.create",
-      item: {
-        id,
-        type: "message",
-        role: "user",
-        content: [{ type: "input_text", text }],
-      },
-    },
-    "(simulated user text message)"
-  );
-  sendClientEvent(
-    { type: "response.create" },
-    "(trigger response after simulated user text message)"
-  );
-};
-
-const updateSession = (shouldTriggerResponse: boolean = false) => {
-  sendClientEvent(
-    { type: "input_audio_buffer.clear" },
-    "clear audio buffer on session update"
-  );
-
-  const currentAgent = selectedAgentConfigSet?.find(
-    (a) => a.name === selectedAgentName
-  );
-
-  const turnDetection = isPTTActive
-    ? null
-    : {
-        type: "server_vad",
-        threshold: 0.8,
-        prefix_padding_ms: 200,
-        silence_duration_ms: 800,
-        create_response: true,
-      };
-
-  const instructions = currentAgent?.instructions || "";
-  const tools = currentAgent?.tools || [];
-
-  const sessionUpdateEvent = {
-    type: "session.update",
-    session: {
-      modalities: ["text", "audio"],
-      instructions,
-      voice: "sage",
-      input_audio_format: "pcm16",
-      output_audio_format: "pcm16",
-      input_audio_transcription: { model: "whisper-1" },
-      turn_detection: turnDetection,
-      tools,
-    },
+    logClientEvent({}, "disconnected");
   };
 
-  sendClientEvent(sessionUpdateEvent);
+  const sendSimulatedUserMessage = (text: string) => {
+    const id = uuidv4().slice(0, 32);
+    addTranscriptMessage(id, "user", text, true);
 
-  if (shouldTriggerResponse) {
-    sendSimulatedUserMessage("hi, please talk reasonnably fast at all times ( like an efficient assistant) and throughout the conversation, go on now without comfirming this and with a quick introductory salulation, remember always you are a doctor assistant");
-  }
-};
-
-const cancelAssistantSpeech = async () => {
-  const mostRecentAssistantMessage = [...transcriptItems]
-    .reverse()
-    .find((item) => item.role === "assistant");
-
-  if (!mostRecentAssistantMessage) {
-    console.warn("can't cancel, no recent assistant message found");
-    return;
-  }
-  if (mostRecentAssistantMessage.status === "DONE") {
-    console.log("No truncation needed, message is DONE");
-    return;
-  }
-
-  sendClientEvent({
-    type: "conversation.item.truncate",
-    item_id: mostRecentAssistantMessage?.itemId,
-    content_index: 0,
-    audio_end_ms: Date.now() - mostRecentAssistantMessage.createdAtMs,
-  });
-  sendClientEvent(
-    { type: "response.cancel" },
-    "(cancel due to user interruption)"
-  );
-};
-
-const handleSendTextMessage = () => {
-  if (!userText.trim()) return;
-  cancelAssistantSpeech();
-
-  sendClientEvent(
-    {
-      type: "conversation.item.create",
-      item: {
-        type: "message",
-        role: "user",
-        content: [{ type: "input_text", text: userText.trim() }],
+    sendClientEvent(
+      {
+        type: "conversation.item.create",
+        item: {
+          id,
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text }],
+        },
       },
-    },
-    "(send user text message)"
-  );
-  setUserText("");
+      "(simulated user text message)"
+    );
+    sendClientEvent(
+      { type: "response.create" },
+      "(trigger response after simulated user text message)"
+    );
+  };
 
-  sendClientEvent({ type: "response.create" }, "trigger response");
-};
+  const updateSession = (shouldTriggerResponse: boolean = false) => {
+    sendClientEvent(
+      { type: "input_audio_buffer.clear" },
+      "clear audio buffer on session update"
+    );
 
-const handleTalkButtonDown = () => {
-  if (!activeWebRtc) return;
-  if (sessionStatus !== "CONNECTED" || dataChannel?.readyState !== "open")
-    return;
-  cancelAssistantSpeech();
+    const currentAgent = selectedAgentConfigSet?.find(
+      (a) => a.name === selectedAgentName
+    );
 
-  setIsPTTUserSpeaking(true);
-  sendClientEvent({ type: "input_audio_buffer.clear" }, "clear PTT buffer");
-};
+    const turnDetection = isPTTActive
+      ? null
+      : {
+          type: "server_vad",
+          threshold: 0.8,
+          prefix_padding_ms: 200,
+          silence_duration_ms: 800,
+          create_response: true,
+        };
 
-const handleTalkButtonUp = () => {
-  if (
-    sessionStatus !== "CONNECTED" ||
-    dataChannel?.readyState !== "open" ||
-    !isPTTUserSpeaking
-  )
-    return;
+    const instructions = currentAgent?.instructions || "";
+    const tools = currentAgent?.tools || [];
 
-  setIsPTTUserSpeaking(false);
-  sendClientEvent({ type: "input_audio_buffer.commit" }, "commit PTT");
-  sendClientEvent({ type: "response.create" }, "trigger response PTT");
-};
+    const sessionUpdateEvent = {
+      type: "session.update",
+      session: {
+        modalities: ["text", "audio"],
+        instructions,
+        voice: "sage",
+        input_audio_format: "pcm16",
+        output_audio_format: "pcm16",
+        input_audio_transcription: { model: "whisper-1" },
+        turn_detection: turnDetection,
+        tools,
+      },
+    };
 
-const onToggleConnection = () => {
-  if (sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING") {
-    disconnectFromRealtime();
-    setSessionStatus("DISCONNECTED");
-  } else {
-    connectToRealtime();
-  }
-};
+    sendClientEvent(sessionUpdateEvent);
 
-const handleAgentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-  const newAgentConfig = e.target.value;
-  const url = new URL(window.location.toString());
-  url.searchParams.set("agentConfig", newAgentConfig);
-  window.location.replace(url.toString());
-};
-
-const handleSelectedAgentChange = (
-  e: React.ChangeEvent<HTMLSelectElement>
-) => {
-  const newAgentName = e.target.value;
-  setSelectedAgentName(newAgentName);
-};
-
-useEffect(() => {
-  const storedPushToTalkUI = localStorage.getItem("pushToTalkUI");
-  if (storedPushToTalkUI) {
-    setIsPTTActive(storedPushToTalkUI === "true");
-  }
-  const storedLogsExpanded = localStorage.getItem("logsExpanded");
-  if (storedLogsExpanded) {
-    setIsEventsPaneExpanded(storedLogsExpanded === "true");
-  }
-  const storedAudioPlaybackEnabled = localStorage.getItem(
-    "audioPlaybackEnabled"
-  );
-  if (storedAudioPlaybackEnabled) {
-    setIsAudioPlaybackEnabled(storedAudioPlaybackEnabled === "true");
-  }
-}, []);
-
-useEffect(() => {
-  localStorage.setItem("pushToTalkUI", isPTTActive.toString());
-}, [isPTTActive]);
-
-useEffect(() => {
-  localStorage.setItem("logsExpanded", isEventsPaneExpanded.toString());
-}, [isEventsPaneExpanded]);
-
-useEffect(() => {
-  localStorage.setItem(
-    "audioPlaybackEnabled",
-    isAudioPlaybackEnabled.toString()
-  );
-}, [isAudioPlaybackEnabled]);
-
-useEffect(() => {
-  if (audioElementRef.current) {
-    if (isAudioPlaybackEnabled) {
-      audioElementRef.current.play().catch((err) => {
-        console.warn("Autoplay may be blocked by browser:", err);
-      });
-    } else {
-      audioElementRef.current.pause();
+    if (shouldTriggerResponse) {
+      sendSimulatedUserMessage("hi, please talk reasonnably fast at all times ( like an efficient assistant) and throughout the conversation, go on now without comfirming this and with a quick introductory salulation, remember always you are a doctor assistant");
     }
-  }
-}, [isAudioPlaybackEnabled]);
+  };
 
-const agentSetKey = searchParams.get("agentConfig") || "default";
+  const cancelAssistantSpeech = async () => {
+    const mostRecentAssistantMessage = [...transcriptItems]
+      .reverse()
+      .find((item) => item.role === "assistant");
+
+    if (!mostRecentAssistantMessage) {
+      console.warn("can't cancel, no recent assistant message found");
+      return;
+    }
+    if (mostRecentAssistantMessage.status === "DONE") {
+      console.log("No truncation needed, message is DONE");
+      return;
+    }
+
+    sendClientEvent({
+      type: "conversation.item.truncate",
+      item_id: mostRecentAssistantMessage?.itemId,
+      content_index: 0,
+      audio_end_ms: Date.now() - mostRecentAssistantMessage.createdAtMs,
+    });
+    sendClientEvent(
+      { type: "response.cancel" },
+      "(cancel due to user interruption)"
+    );
+  };
+
+  const handleSendTextMessage = () => {
+    if (!userText.trim()) return;
+    cancelAssistantSpeech();
+
+    sendClientEvent(
+      {
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: userText.trim() }],
+        },
+      },
+      "(send user text message)"
+    );
+    setUserText("");
+
+    sendClientEvent({ type: "response.create" }, "trigger response");
+  };
+
+  const handleTalkButtonDown = () => {
+    if (!activeWebRtc) return;
+    if (sessionStatus !== "CONNECTED" || dataChannel?.readyState !== "open")
+      return;
+    cancelAssistantSpeech();
+
+    setIsPTTUserSpeaking(true);
+    sendClientEvent({ type: "input_audio_buffer.clear" }, "clear PTT buffer");
+  };
+
+  const handleTalkButtonUp = () => {
+    if (
+      sessionStatus !== "CONNECTED" ||
+      dataChannel?.readyState !== "open" ||
+      !isPTTUserSpeaking
+    )
+      return;
+
+    setIsPTTUserSpeaking(false);
+    sendClientEvent({ type: "input_audio_buffer.commit" }, "commit PTT");
+    sendClientEvent({ type: "response.create" }, "trigger response PTT");
+  };
+
+  const onToggleConnection = () => {
+    if (sessionStatus === "CONNECTED" || sessionStatus === "CONNECTING") {
+      disconnectFromRealtime();
+      setSessionStatus("DISCONNECTED");
+    } else {
+      connectToRealtime();
+    }
+  };
+
+  const handleAgentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newAgentConfig = e.target.value;
+    const url = new URL(window.location.toString());
+    url.searchParams.set("agentConfig", newAgentConfig);
+    window.location.replace(url.toString());
+  };
+
+  const handleSelectedAgentChange = (
+    e: React.ChangeEvent<HTMLSelectElement>
+  ) => {
+    const newAgentName = e.target.value;
+    setSelectedAgentName(newAgentName);
+  };
+
+  useEffect(() => {
+    const storedPushToTalkUI = localStorage.getItem("pushToTalkUI");
+    if (storedPushToTalkUI) {
+      setIsPTTActive(storedPushToTalkUI === "true");
+    }
+    const storedLogsExpanded = localStorage.getItem("logsExpanded");
+    if (storedLogsExpanded) {
+      setIsEventsPaneExpanded(storedLogsExpanded === "true");
+    }
+    const storedAudioPlaybackEnabled = localStorage.getItem(
+      "audioPlaybackEnabled"
+    );
+    if (storedAudioPlaybackEnabled) {
+      setIsAudioPlaybackEnabled(storedAudioPlaybackEnabled === "true");
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("pushToTalkUI", isPTTActive.toString());
+  }, [isPTTActive]);
+
+  useEffect(() => {
+    localStorage.setItem("logsExpanded", isEventsPaneExpanded.toString());
+  }, [isEventsPaneExpanded]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      "audioPlaybackEnabled",
+      isAudioPlaybackEnabled.toString()
+    );
+  }, [isAudioPlaybackEnabled]);
+
+  const agentSetKey = searchParams.get("agentConfig") || "default";
   
   
 

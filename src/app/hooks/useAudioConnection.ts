@@ -1,6 +1,6 @@
 import { useCallback, useRef, useEffect, useState } from 'react';
 import { SessionStatus, AudioBuffer } from '@/app/types';
-import { createRealtimeConnection } from '../lib/realtimeConnection';
+import { connectionForOutputBuffer } from '../lib/connectionForOutputBuffer';
 
 interface UseAudioConnectionParams {
   micStream: MediaStream | null;
@@ -33,35 +33,45 @@ export function useAudioConnection({
   // Buffer refs
   const doctorToPatientBuffer = useRef<AudioBuffer>({
     chunks: [],
-    addChunk: (chunk: Blob) => {
-      doctorToPatientBuffer.current.chunks.push(chunk);
+    addChunk(chunk: Blob) {
+      this.chunks.push(chunk);
     },
-    clear: () => {
-      doctorToPatientBuffer.current.chunks = [];
+    clear() {
+      this.chunks = [];
     },
-    getAudioBlob: () => new Blob(doctorToPatientBuffer.current.chunks),
+    getAudioBlob() {
+      return new Blob(this.chunks);
+    }
   });
 
   const patientToDoctorBuffer = useRef<AudioBuffer>({
     chunks: [],
-    addChunk: (chunk: Blob) => {
-      patientToDoctorBuffer.current.chunks.push(chunk);
+    addChunk(chunk: Blob) {
+      this.chunks.push(chunk);
     },
-    clear: () => {
-      patientToDoctorBuffer.current.chunks = [];
+    clear() {
+      this.chunks = [];
     },
-    getAudioBlob: () => new Blob(patientToDoctorBuffer.current.chunks),
+    getAudioBlob() {
+      return new Blob(this.chunks);
+    }
   });
 
   // Connection status
   const [sessionStatusDoctorToPatient, setSessionStatusDoctorToPatient] = useState<SessionStatus>("DISCONNECTED");
   const [sessionStatusPatientToDoctor, setSessionStatusPatientToDoctor] = useState<SessionStatus>("DISCONNECTED");
 
+  const fetchEphemeralKey = useCallback(async (): Promise<string | null> => {
+    const tokenResponse = await fetch("/api/session");
+    const data = await tokenResponse.json();
+    return data.client_secret?.value || null;
+  }, []);
+
   const connectAgentSession = useCallback(async (
-    sessionType: string,
+    sessionType: "doctorToPatient" | "patientToDoctor",
     buffer: React.RefObject<AudioBuffer>,
-    pcRef: React.RefObject<RTCPeerConnection>,
-    dcRef: React.RefObject<RTCDataChannel>,
+    pcRef: React.RefObject<RTCPeerConnection | null>,
+    dcRef: React.RefObject<RTCDataChannel | null>,
     setSessionStatusLocal: (status: SessionStatus) => void
   ) => {
     try {
@@ -69,7 +79,18 @@ export function useAudioConnection({
         throw new Error("No microphone stream available");
       }
 
-      const { pc, dc } = await createRealtimeConnection(micStream);
+      const key = await fetchEphemeralKey();
+      if (!key) {
+        throw new Error("Failed to obtain ephemeral key");
+      }
+
+      const { pc, dc } = await connectionForOutputBuffer(
+        sessionType,
+        key,
+        micStream,
+        buffer.current
+      );
+
       pcRef.current = pc;
       dcRef.current = dc;
 
@@ -96,7 +117,7 @@ export function useAudioConnection({
       console.error(`[${sessionType}] Connection error:`, err);
       setSessionStatusLocal("DISCONNECTED");
     }
-  }, [micStream]);
+  }, [micStream, fetchEphemeralKey]);
 
   const startParallelConnections = useCallback(async () => {
     if (!micStream) {
@@ -193,70 +214,3 @@ export function useAudioConnection({
     cleanupConnections,
   };
 }
-const connectionOutputBuffer = async (
-  sessionType: "doctorToPatient" | "patientToDoctor",
-  EPHEMERAL_KEY: string,
-  micStream: MediaStream,
-  buffer: AudioBuffer // Structured buffer object
-): Promise<{ pc: RTCPeerConnection; dc: RTCDataChannel }> => {
-
-  const pc = new RTCPeerConnection();
-
-  // Handle incoming audio: Store in buffer instead of direct playback
-  pc.ontrack = (e) => {
-    if (e.streams[0]) {
-      const stream = e.streams[0];
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: "audio/webm",
-      });
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          buffer.addChunk(event.data);
-          console.log(`[${sessionType}] Audio chunk added to buffer.`);
-        }
-      };
-
-      mediaRecorder.onstop = () => {
-        console.log(`[${sessionType}] MediaRecorder stopped. Finalizing buffer.`);
-      };
-
-      mediaRecorder.start(100); // Collect data in 100ms chunks
-
-      // Stop recording when track ends
-      stream.getTracks().forEach(track => {
-        track.onended = () => {
-          mediaRecorder.stop();
-        };
-      });
-    }
-  };
-
-  // Attach mic audio track
-  const track = micStream.getAudioTracks()[0];
-  if (track) pc.addTrack(track);
-
-  // Create DataChannel dynamically based on session type
-  const dc = pc.createDataChannel(sessionType);
-
-  // WebRTC SDP handshake with OpenAI
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-
-  const baseUrl = "https://api.openai.com/v1/realtime";
-  const model = "gpt-4o-realtime-preview-2024-12-17";
-
-  const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
-    method: "POST",
-    body: offer.sdp,
-    headers: {
-      Authorization: `Bearer ${EPHEMERAL_KEY}`,
-      "Content-Type": "application/sdp",
-    },
-  });
-
-  const answerSdp = await sdpResponse.text();
-  await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
-
-  return { pc, dc };
-};

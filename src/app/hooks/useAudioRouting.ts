@@ -8,6 +8,7 @@ interface UseAudioRoutingParams {
   parallelConnection: boolean;
   doctorToPatientBuffer: React.RefObject<AudioBuffer>;
   patientToDoctorBuffer: React.RefObject<AudioBuffer>;
+  audioElement: HTMLAudioElement;
 }
 
 export function useAudioRouting({
@@ -17,17 +18,9 @@ export function useAudioRouting({
   parallelConnection,
   doctorToPatientBuffer,
   patientToDoctorBuffer,
+  audioElement
 }: UseAudioRoutingParams) {
-  const audioElementRef = useRef<HTMLAudioElement | null>(null);
-
-  // Initialize audio element
-  useEffect(() => {
-    if (!audioElementRef.current) {
-      const audioElement = new Audio();
-      audioElement.autoplay = false; // We'll control playback manually
-      audioElementRef.current = audioElement;
-    }
-  }, []);
+  const audioRef = useRef<HTMLAudioElement>(audioElement);
 
   const routeAudioBuffer = useCallback(() => {
     if (!spokenLanguage || spokenLanguage === "unknown") {
@@ -50,58 +43,40 @@ export function useAudioRouting({
     console.log("Doctor Language:", doctorLanguage);
     console.log("Patient Language:", patientLanguage);
 
-    if (!audioElementRef.current) {
-      console.error("❌ No audio element available for playback");
+    const isDoctor = spokenLanguage.toLowerCase() === doctorLanguage?.toLowerCase();
+    const buffer = isDoctor ? doctorToPatientBuffer.current : patientToDoctorBuffer.current;
+
+    if (!buffer) {
+      console.log("❌ Cannot route audio: buffer not found");
       return;
     }
 
-    try {
-      // If doctor is speaking (language matches doctor's language)
-      if (spokenLanguage.toLowerCase() === doctorLanguage?.toLowerCase()) {
-        console.log("👨‍⚕️ Doctor is speaking - using doctor-to-patient buffer");
-        const audioBlob = doctorToPatientBuffer.current.getAudioBlob();
-        const audioUrl = URL.createObjectURL(audioBlob);
-        audioElementRef.current.src = audioUrl;
-        audioElementRef.current.play();
-        
-        // Clean up URL after playback
-        audioElementRef.current.onended = () => {
-          URL.revokeObjectURL(audioUrl);
-        };
-      }
-      // If patient is speaking (language matches patient's language)
-      else if (spokenLanguage.toLowerCase() === patientLanguage?.toLowerCase()) {
-        console.log("👤 Patient is speaking - using patient-to-doctor buffer");
-        const audioBlob = patientToDoctorBuffer.current.getAudioBlob();
-        const audioUrl = URL.createObjectURL(audioBlob);
-        audioElementRef.current.src = audioUrl;
-        audioElementRef.current.play();
-        
-        // Clean up URL after playback
-        audioElementRef.current.onended = () => {
-          URL.revokeObjectURL(audioUrl);
-        };
-      } else {
-        console.log("❌ Spoken language doesn't match either party - discarding buffers");
-      }
-    } catch (error) {
-      console.error("❌ Error routing audio:", error);
-    } finally {
-      // Clear both buffers regardless of which one was used
-      console.log("🧹 Clearing audio buffers");
+    const audioBlob = buffer.getAudioBlob();
+    const audioUrl = URL.createObjectURL(audioBlob);
+
+    audioRef.current.src = audioUrl;
+    audioRef.current.play().catch(error => {
+      console.error("Error playing audio:", error);
+    });
+
+    // Cleanup the URL and both buffers after the audio is done playing
+    audioRef.current.onended = () => {
+      URL.revokeObjectURL(audioUrl);
+      // Clear both buffers since they might both contain data
       doctorToPatientBuffer.current.clear();
       patientToDoctorBuffer.current.clear();
-    }
-  }, [spokenLanguage, doctorLanguage, patientLanguage, parallelConnection, doctorToPatientBuffer, patientToDoctorBuffer]);
+      console.log("🧹 Cleared both audio buffers");
+    };
+  }, [spokenLanguage, doctorLanguage, patientLanguage, doctorToPatientBuffer, patientToDoctorBuffer]);
 
   // Effect to handle audio routing when spoken language changes
   useEffect(() => {
-    if (spokenLanguage && spokenLanguage !== "unknown") {
+    if (spokenLanguage && parallelConnection) {
       routeAudioBuffer();
     }
-  }, [spokenLanguage, routeAudioBuffer]);
+  }, [spokenLanguage, parallelConnection, routeAudioBuffer]);
 
   return {
-    routeAudioBuffer,
+    routeAudioBuffer
   };
 }
