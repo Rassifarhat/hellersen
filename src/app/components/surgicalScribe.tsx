@@ -69,7 +69,7 @@ export default function SurgicalScribePage() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              to: "sarahrassi2009@gmail.com",
+              to: "rassiphfarhat@gmail.com",
               subject: firstTenWords,
               text: emailContent,
             }),

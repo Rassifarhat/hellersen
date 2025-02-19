@@ -1,8 +1,8 @@
 import { AllAgentConfigsType } from "@/app/types";
-import hellersenOrtho from "./ChiefAssistant";
+import hellersenOrthoSet from "./ChiefAssistant";
 
 export const allAgentSets: AllAgentConfigsType = {
-  hellersenOrtho,
+  hellersenOrtho: hellersenOrthoSet
 };
 
 export const defaultAgentSetKey = "hellersenOrtho";

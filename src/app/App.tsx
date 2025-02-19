@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState, RefObject, useCallback, useMemo } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { v4 as uuidv4 } from "uuid";
 
@@ -19,9 +19,6 @@ import { useTranscript } from "@/app/contexts/TranscriptContext";
 import { useEvent } from "@/app/contexts/EventContext";
 import { useHandleServerEvent } from "./hooks/useHandleServerEvent";
 import { useGlobalFlag } from "./contexts/GlobalFlagContext";
-import { useLanguage } from "./contexts/LanguageContext";
-import { useAudioConnection } from './hooks/useAudioConnection';
-import { useAudioRouting } from './hooks/useAudioRouting';
 
 // Utilities
 import { createRealtimeConnection } from "./lib/realtimeConnection";
@@ -29,82 +26,32 @@ import { createRealtimeConnection } from "./lib/realtimeConnection";
 // Agent configs
 import { allAgentSets, defaultAgentSetKey } from "@/app/agentConfigs";
 
-interface AudioBuffer {
-  chunks: Blob[];
-  addChunk: (chunk: Blob) => void;
-  clear: () => void;
-  getAudioBlob: () => Blob;
-}
-
 function App() {
   const searchParams = useSearchParams();
 
-  const { transcriptItems, addTranscriptMessage, addTranscriptBreadcrumb } = useTranscript();
+  const { transcriptItems, addTranscriptMessage, addTranscriptBreadcrumb } =
+    useTranscript();
   const { logClientEvent, logServerEvent } = useEvent();
-  const { parallelConnection, micStream, activeWebRtc, toggleGlobalFlag, spokenLanguage } = useGlobalFlag();
-  const { doctorLanguage, patientLanguage } = useLanguage();
+  const { activeWebRtc, toggleGlobalFlag, micStream } = useGlobalFlag();
 
   const [selectedAgentName, setSelectedAgentName] = useState<string>("");
-  const [selectedAgentConfigSet, setSelectedAgentConfigSet] = useState<AgentConfig[] | null>(null);
+  const [selectedAgentConfigSet, setSelectedAgentConfigSet] =
+    useState<AgentConfig[] | null>(null);
 
   const [dataChannel, setDataChannel] = useState<RTCDataChannel | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const dcRef = useRef<RTCDataChannel | null>(null);
-  const [sessionStatus, setSessionStatus] = useState<SessionStatus>("DISCONNECTED");
+  const audioElementRef = useRef<HTMLAudioElement | null>(null);
+  const [sessionStatus, setSessionStatus] =
+    useState<SessionStatus>("DISCONNECTED");
 
-  const audioElement = useMemo(() => {
-    const audio = new Audio();
-    audio.autoplay = false;
-    return audio;
-  }, []);
-
-  const {
-    doctorToPatientBuffer,
-    patientToDoctorBuffer,
-    sessionStatusDoctorToPatient,
-    sessionStatusPatientToDoctor,
-    startParallelConnections,
-    cleanupConnections
-  } = useAudioConnection({
-    micStream,
-    doctorLanguage,
-    patientLanguage,
-    parallelConnection
-  });
-
-  const { routeAudioBuffer } = useAudioRouting({
-    spokenLanguage,
-    doctorLanguage,
-    patientLanguage,
-    parallelConnection,
-    doctorToPatientBuffer,
-    patientToDoctorBuffer,
-    audioElement
-  });
-
-  useEffect(() => {
-    if (parallelConnection && doctorLanguage && patientLanguage) {
-      startParallelConnections();
-    }
-  }, [parallelConnection, doctorLanguage, patientLanguage, startParallelConnections]);
-
-  useEffect(() => {
-    if (spokenLanguage && spokenLanguage !== "unknown") {
-      routeAudioBuffer();
-    }
-  }, [spokenLanguage, routeAudioBuffer]);
-
-  useEffect(() => {
-    if (!parallelConnection) {
-      cleanupConnections();
-    }
-  }, [parallelConnection, cleanupConnections]);
-
-  const [isEventsPaneExpanded, setIsEventsPaneExpanded] = useState<boolean>(true);
+  const [isEventsPaneExpanded, setIsEventsPaneExpanded] =
+    useState<boolean>(true);
   const [userText, setUserText] = useState<string>("");
   const [isPTTActive, setIsPTTActive] = useState<boolean>(false);
   const [isPTTUserSpeaking, setIsPTTUserSpeaking] = useState<boolean>(false);
-  const [isAudioPlaybackEnabled, setIsAudioPlaybackEnabled] = useState<boolean>(true);
+  const [isAudioPlaybackEnabled, setIsAudioPlaybackEnabled] =
+    useState<boolean>(true);
 
   const sendClientEvent = (eventObj: any, eventNameSuffix = "") => {
     if (!activeWebRtc) {
@@ -155,15 +102,16 @@ function App() {
 
   useEffect(() => {
     if (selectedAgentName && sessionStatus === "DISCONNECTED") {
-    connectToRealtime();
-  }
-}, [selectedAgentName]);
+      connectToRealtime();
+    }
+  }, [selectedAgentName]);
 
   useEffect(() => {
     if (
       sessionStatus === "CONNECTED" &&
       selectedAgentConfigSet &&
-      selectedAgentName
+      selectedAgentName &&
+      dcRef.current?.readyState === "open"
     ) {
       const currentAgent = selectedAgentConfigSet.find(
         (a) => a.name === selectedAgentName
@@ -174,10 +122,14 @@ function App() {
       );
       updateSession(true);
     }
-  }, [selectedAgentConfigSet, selectedAgentName, sessionStatus]);
+  }, [selectedAgentConfigSet, selectedAgentName]);
 
   useEffect(() => {
-    if (sessionStatus === "CONNECTED") {
+    if (
+      sessionStatus === "CONNECTED" &&
+      dcRef.current?.readyState === "open" &&
+      selectedAgentName
+    ) {
       console.log(
         `updatingSession, isPTTActive=${isPTTActive} sessionStatus=${sessionStatus}`
       );
@@ -197,80 +149,69 @@ function App() {
     }
   }, [activeWebRtc]);
 
+
+
+  
+
   const fetchEphemeralKey = async (): Promise<string | null> => {
-  logClientEvent({ url: "/session" }, "fetch_session_token_request");
-  const tokenResponse = await fetch("/api/session");
-  const data = await tokenResponse.json();
-  logServerEvent(data, "fetch_session_token_response");
+    logClientEvent({ url: "/session" }, "fetch_session_token_request");
+    const tokenResponse = await fetch("/api/session");
+    const data = await tokenResponse.json();
+    logServerEvent(data, "fetch_session_token_response");
 
-  if (!data.client_secret?.value) {
-    logClientEvent(data, "error.no_ephemeral_key");
-    console.error("No ephemeral key provided by the server");
-    setSessionStatus("DISCONNECTED");
-    return null;
-  }
-
-  return data.client_secret.value;
-};
-
-const connectToRealtime = async () => {
-  if (sessionStatus !== "DISCONNECTED" || !micStream) return;
-  setSessionStatus("CONNECTING");
-
-  try {
-    const EPHEMERAL_KEY = await fetchEphemeralKey();
-    if (!EPHEMERAL_KEY) {
-      return;
+    if (!data.client_secret?.value) {
+      logClientEvent(data, "error.no_ephemeral_key");
+      console.error("No ephemeral key provided by the server");
+      setSessionStatus("DISCONNECTED");
+      return null;
     }
 
-    audioElement.autoplay = isAudioPlaybackEnabled;
+    return data.client_secret.value;
+  };
 
-    const { pc, dc } = await createRealtimeConnection(
-      EPHEMERAL_KEY,
-      audioElement,
-      micStream
-    );
-    pcRef.current = pc;
-    dcRef.current = dc;
+  const connectToRealtime = async () => {
+    if (sessionStatus !== "DISCONNECTED" || !micStream) return;
 
-    dc.addEventListener("open", () => {
-      logClientEvent({}, "data_channel.open");
-    });
-    dc.addEventListener("close", () => {
-      logClientEvent({}, "data_channel.close");
-    });
-    dc.addEventListener("error", (err: any) => {
-      logClientEvent({ error: err }, "data_channel.error");
-    });
-    dc.addEventListener("message", (e: MessageEvent) => {
-      handleServerEvent(JSON.parse(e.data));
-    });
+    setSessionStatus("CONNECTING");
 
-    setDataChannel(dc);
-    setSessionStatus("CONNECTED");
-  } catch (err) {
-    console.error("Error connecting to realtime:", err);
-    setSessionStatus("DISCONNECTED");
-  }
-};
-
-  useEffect(() => {
-    if (audioElement) {
-      audioElement.autoplay = isAudioPlaybackEnabled;
-    }
-  }, [audioElement, isAudioPlaybackEnabled]);
-
-  useEffect(() => {
-    if (audioElement) {
-      if (isAudioPlaybackEnabled) {
-        audioElement.play().catch((err) => {
-          console.warn("Autoplay may be blocked by browser:", err);
-        });
-      } else {
-        audioElement.pause();
+    try {
+      const EPHEMERAL_KEY = await fetchEphemeralKey();
+      if (!EPHEMERAL_KEY) {
+        return;
       }
+
+      if (!audioElementRef.current) {
+        audioElementRef.current = document.createElement("audio");
+      }
+      audioElementRef.current.autoplay = isAudioPlaybackEnabled;
+
+      const { pc, dc } = await createRealtimeConnection(
+        EPHEMERAL_KEY,
+        audioElementRef,
+        micStream
+      );
+      pcRef.current = pc;
+      dcRef.current = dc;
+
+      dc.addEventListener("open", () => {
+        logClientEvent({}, "data_channel.open");
+      });
+      dc.addEventListener("close", () => {
+        logClientEvent({}, "data_channel.close");
+      });
+      dc.addEventListener("error", (err: any) => {
+        logClientEvent({ error: err }, "data_channel.error");
+      });
+      dc.addEventListener("message", (e: MessageEvent) => {
+        handleServerEvent(JSON.parse(e.data));
+      });
+
+      setDataChannel(dc);
+    } catch (err) {
+      console.error("Error connecting to realtime:", err);
+      setSessionStatus("DISCONNECTED");
     }
-  }, [audioElement, isAudioPlaybackEnabled]);
+  };
 
   const disconnectFromRealtime = () => {
     if (pcRef.current) {
@@ -352,7 +293,7 @@ const connectToRealtime = async () => {
     sendClientEvent(sessionUpdateEvent);
 
     if (shouldTriggerResponse) {
-      sendSimulatedUserMessage("hi, please talk reasonnably fast at all times ( like an efficient assistant) and throughout the conversation, go on now without comfirming this and with a quick introductory salulation, remember always you are a doctor assistant");
+      sendSimulatedUserMessage("hi, please talk reasonnably fast at all times as you are an efficient doctor assistant. start with a quick introductory salulation ONLY");
     }
   };
 
@@ -480,117 +421,130 @@ const connectToRealtime = async () => {
     );
   }, [isAudioPlaybackEnabled]);
 
+  useEffect(() => {
+    if (audioElementRef.current) {
+      if (isAudioPlaybackEnabled) {
+        audioElementRef.current.play().catch((err) => {
+          console.warn("Autoplay may be blocked by browser:", err);
+        });
+      } else {
+        audioElementRef.current.pause();
+      }
+    }
+  }, [isAudioPlaybackEnabled]);
+
   const agentSetKey = searchParams.get("agentConfig") || "default";
   
   
 
-return (
-  <div className="text-base flex flex-col h-screen bg-darkGray text-gray-800 relative">
-    <div className="p-5 text-lg font-semibold flex justify-between items-center">
-      <div className="flex items-center">
-        <div onClick={() => window.location.reload()} style={{ cursor: 'pointer' }}>
-          <Image
-            src="/openai-logomark.svg"
-            alt="OpenAI Logo"
-            width={20}
-            height={20}
-            className="mr-2"
-          />
-        </div>
-        <div>
-          Emirates International Hospital <span className="text-gray-500">Digital Twin</span>
-        </div>
-      </div>
-      <div className="flex items-center">
-        <label className="flex items-center text-base gap-1 mr-2 font-medium">
-          Scenario
-        </label>
-        <div className="relative inline-block">
-          <select
-            value={agentSetKey}
-            onChange={handleAgentChange}
-            className="appearance-none border border-gray-300 rounded-lg text-base px-2 py-1 pr-8 cursor-pointer font-normal focus:outline-none"
-          >
-            {Object.keys(allAgentSets).map((agentKey) => (
-              <option key={agentKey} value={agentKey}>
-                {agentKey}
-              </option>
-            ))}
-          </select>
-          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-gray-600">
-            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-              <path
-                fillRule="evenodd"
-                d="M5.23 7.21a.75.75 0 011.06.02L10 10.44l3.71-3.21a.75.75 0 111.04 1.08l-4.25 3.65a.75.75 0 01-1.04 0L5.21 8.27a.75.75 0 01.02-1.06z"
-                clipRule="evenodd"
-              />
-            </svg>
+  return (
+    <div className="text-base flex flex-col h-screen bg-darkGray text-gray-800 relative">
+      <div className="p-5 text-lg font-semibold flex justify-between items-center">
+        <div className="flex items-center">
+          <div onClick={() => window.location.reload()} style={{ cursor: 'pointer' }}>
+            <Image
+              src="/openai-logomark.svg"
+              alt="OpenAI Logo"
+              width={20}
+              height={20}
+              className="mr-2"
+            />
+          </div>
+          <div className="text-red-600">
+            Emirates International Hospital <span className="text-gray-500">Digital Twin</span>
           </div>
         </div>
-
-        {agentSetKey && (
-          <div className="flex items-center ml-6">
-            <label className="flex items-center text-base gap-1 mr-2 font-medium">
-              Agent
-            </label>
-            <div className="relative inline-block">
-              <select
-                value={selectedAgentName}
-                onChange={handleSelectedAgentChange}
-                className="appearance-none border border-gray-300 rounded-lg text-base px-2 py-1 pr-8 cursor-pointer font-normal focus:outline-none"
-              >
-                {selectedAgentConfigSet?.map((agent) => (
-                  <option key={agent.name} value={agent.name}>
-                    {agent.name}
-                  </option>
-                ))}
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-gray-600">
-                <svg
-                  className="h-4 w-4"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M5.23 7.21a.75.75 0 011.06.02L10 10.44l3.71-3.21a.75.75 0 111.04 1.08l-4.25 3.65a.75.75 0 01-1.04 0L5.21 8.27a.75.75 0 01.02-1.06z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              </div>
+        <div className="flex items-center">
+          <label className="flex items-center text-base gap-1 mr-2 font-medium">
+            Scenario
+          </label>
+          <div className="relative inline-block">
+            <select
+              value={agentSetKey}
+              onChange={handleAgentChange}
+              className="appearance-none border border-gray-300 rounded-lg text-base px-2 py-1 pr-8 cursor-pointer font-normal focus:outline-none"
+            >
+              {Object.keys(allAgentSets).map((agentKey) => (
+                <option key={agentKey} value={agentKey}>
+                  {agentKey}
+                </option>
+              ))}
+            </select>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-gray-600">
+              <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                <path
+                  fillRule="evenodd"
+                  d="M5.23 7.21a.75.75 0 011.06.02L10 10.44l3.71-3.21a.75.75 0 111.04 1.08l-4.25 3.65a.75.75 0 01-1.04 0L5.21 8.27a.75.75 0 01.02-1.06z"
+                  clipRule="evenodd"
+                />
+              </svg>
             </div>
           </div>
-        )}
-      </div>
-    </div>
 
-    <div className="flex flex-1 gap-2 px-2 overflow-hidden relative">
-      <Transcript
-        userText={userText}
-        setUserText={setUserText}
-        onSendMessage={handleSendTextMessage}
-        canSend={
-          sessionStatus === "CONNECTED" &&
-          dcRef.current?.readyState === "open"
-        }
-      />
+          {agentSetKey && (
+            <div className="flex items-center ml-6">
+              <label className="flex items-center text-base gap-1 mr-2 font-medium">
+                Agent
+              </label>
+              <div className="relative inline-block">
+                <select
+                  value={selectedAgentName}
+                  onChange={handleSelectedAgentChange}
+                  className="appearance-none border border-gray-300 rounded-lg text-base px-2 py-1 pr-8 cursor-pointer font-normal focus:outline-none"
+                >
+                  {selectedAgentConfigSet?.map((agent) => (
+                    <option key={agent.name} value={agent.name}>
+                      {agent.name}
+                    </option>
+                  ))}
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2 text-gray-600">
+                  <svg
+                    className="h-4 w-4"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M5.23 7.21a.75.75 0 011.06.02L10 10.44l3.71-3.21a.75.75 0 111.04 1.08l-4.25 3.65a.75.75 0 01-1.04 0L5.21 8.27a.75.75 0 01.02-1.06z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-1 gap-2 px-2 overflow-hidden relative">
+        <Transcript
+          userText={userText}
+          setUserText={setUserText}
+          onSendMessage={handleSendTextMessage}
+          canSend={
+            sessionStatus === "CONNECTED" &&
+            dcRef.current?.readyState === "open"
+          }
+        />
 
 <Dashboard isEventsPaneExpanded={isEventsPaneExpanded}/>
+      </div>
+      <BottomToolbar
+        sessionStatus={sessionStatus}
+        onToggleConnection={onToggleConnection}
+        isPTTActive={isPTTActive}
+        setIsPTTActive={setIsPTTActive}
+        isPTTUserSpeaking={isPTTUserSpeaking}
+        handleTalkButtonDown={handleTalkButtonDown}
+        handleTalkButtonUp={handleTalkButtonUp}
+        isEventsPaneExpanded={isEventsPaneExpanded}
+        setIsEventsPaneExpanded={setIsEventsPaneExpanded}
+        isAudioPlaybackEnabled={isAudioPlaybackEnabled}
+        setIsAudioPlaybackEnabled={setIsAudioPlaybackEnabled}
+      />
     </div>
-    <BottomToolbar
-      sessionStatus={sessionStatus}
-      onToggleConnection={onToggleConnection}
-      isPTTActive={isPTTActive}
-      setIsPTTActive={setIsPTTActive}
-      isPTTUserSpeaking={isPTTUserSpeaking}
-      handleTalkButtonDown={handleTalkButtonDown}
-      handleTalkButtonUp={handleTalkButtonUp}
-      isEventsPaneExpanded={isEventsPaneExpanded}
-      setIsEventsPaneExpanded={setIsEventsPaneExpanded}
-      isAudioPlaybackEnabled={isAudioPlaybackEnabled}
-      setIsAudioPlaybackEnabled={setIsAudioPlaybackEnabled}
-    />
-  </div>
-);
+  );
 }
+
 export default App;

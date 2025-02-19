@@ -31,6 +31,7 @@ export function useHandleServerEvent({
   toggleGlobalFlag,
   shouldProcessEvents = true,
 }: UseHandleServerEventParams) {
+  
   const {
     transcriptItems,
     addTranscriptBreadcrumb,
@@ -50,293 +51,299 @@ export function useHandleServerEvent({
 
   useEffect(() => {
     selectedAgentNameRef.current = selectedAgentName;
-  }, [selectedAgentName]);
+    
+    // Update session modalities when switching to interpreterCoordinator
+    if (selectedAgentName === "interpreterCoordinator") {
+      console.log("🔄 Switching to text-only mode for interpreterCoordinator");
+      sendClientEvent({
+        type: "session.update",
+        session: {
+          modalities: ["text"],
+          tool_choice: "auto"
+        }
+      });
+    } 
+  }, [selectedAgentName, sendClientEvent]);
+
+  
+
+  const appendHiddenSystemMessage = useCallback(async (text: string) => {
+    try {
+      const systemMessage = {
+        type: "conversation.item.create",
+        item: {
+          id: `sys-${uuidv4()}`,
+          role: "system",
+          hidden: true,
+          content: [
+            {
+              type: "text",
+              text
+            },
+          ],
+        },
+      };
+
+      console.log(`🔄 Appending system message: ${text}`);
+      sendClientEvent(systemMessage);
+      return { success: true };
+    } catch (error) {
+      console.error("Error appending system message:", error);
+      addTranscriptBreadcrumb("Failed to append system message", {
+        error: String(error),
+        text
+      });
+      throw error;
+    }
+  }, [sendClientEvent, addTranscriptBreadcrumb]);
 
   const appendLanguageDetectionPrompt = useCallback(() => {
-    const hiddenSystemMessage = {
-      type: "conversation.item.create",
-      item: {
-        id: `sys-${uuidv4()}`,
-        role: "system",
-        hidden: true,
-        content: [
-          {
-            type: "text",
-            text: "Please determine the language of the voice input and output only a tool call to setLanguageFlag.",
-          },
-        ],
-      },
-    };
-    console.log("Appending hidden language detection prompt.");
-    sendClientEvent(hiddenSystemMessage);
-  }, [sendClientEvent]);
+    return appendHiddenSystemMessage(
+      "Please determine the language of the voice input and output only a tool call to setLanguageFlag."
+    );
+  }, [appendHiddenSystemMessage]);
 
-  const appendParallelAgentsPrompt = useCallback((doctorLang: string, patientLang: string) => {
-    const hiddenSystemMessage = {
-      type: "conversation.item.create",
-      item: {
-        id: `sys-${uuidv4()}`,
-        role: "system",
-        hidden: true,
-        content: [
-          {
-            type: "text",
-            text: `Please call the startParallelAgents tool with doctorLanguage: "${doctorLang}" and patientLanguage: "${patientLang}". Do not modify these values.`,
-          },
-        ],
-      },
-    };
-    console.log("Appending hidden parallel agents prompt.");
-    sendClientEvent(hiddenSystemMessage);
-  }, [sendClientEvent]);
+  const appendParallelAgentsPrompt = useCallback(async (doctorLanguage: string, patientLanguage: string) => {
+    return appendHiddenSystemMessage(
+      `You are now in parallel connection mode. The doctor speaks ${doctorLanguage} and the patient speaks ${patientLanguage}. Please coordinate the conversation between them.`
+    );
+  }, [appendHiddenSystemMessage]);
 
   const appendInterpreterTransferPrompt = useCallback(() => {
-    const hiddenSystemMessage = {
-      type: "conversation.item.create",
-      item: {
-        id: `sys-${uuidv4()}`,
-        role: "system",
-        hidden: true,
-        content: [
-          {
-            type: "text",
-            text: `Please call the transferAgents tool with destination_agent: "interpreterCoordinator". Do not modify this value.`,
-          },
-        ],
-      },
-    };
-    console.log("Appending hidden interpreter transfer prompt.");
-    sendClientEvent(hiddenSystemMessage);
-  }, [sendClientEvent]);
+    return appendHiddenSystemMessage(
+      `Please call the transferAgents tool with destination_agent: "interpreterCoordinator". Do not modify this value.`
+    );
+  }, [appendHiddenSystemMessage]);
 
-  const handleSetLanguageFlag = useCallback((language: string, confidence: number) => {
-    if (languageToolCalledRef.current) {
-      console.log("setLanguageFlag already called for this input. Ignoring duplicate.");
-      return;
+
+
+
+
+
+  const handleSetLanguageFlag = useCallback(async (language: string) => {
+    try {
+      if (!language || language.toLowerCase() === 'unknown') {
+        throw new Error("Valid language is required");
+      }
+
+      if (languageToolCalledRef.current) {
+        console.log("Language already set for this input, ignoring duplicate call");
+        return { success: false, reason: "Language already set" };
+      }
+
+      languageToolCalledRef.current = true;
+      setSpokenLanguage(language.toLowerCase());
+      console.log("🌐 Language detected:", language);
+      addTranscriptBreadcrumb(`Language detected: ${language}`, { language });
+      
+      return { success: true, language };
+    } catch (error) {
+      console.error("Error in handleSetLanguageFlag:", error);
+      addTranscriptBreadcrumb("Failed to set language", { 
+        error: String(error),
+        language
+      });
+      throw error;
     }
-
-    console.log("├──  Language Detection Started");
-    console.log("├── Input Language:", language);
-
-    const threshold = 0.9;
-    if (confidence < threshold) {
-      console.log(`Detected confidence (${confidence}) is below threshold (${threshold}). Ignoring tool call.`);
-      addTranscriptBreadcrumb("Language detection confidence too low", { language, confidence });
-      return;
-    }
-
-    languageToolCalledRef.current = true;
-    setSpokenLanguage(language.toLowerCase());
-    console.log("🌐 Language Flag Updated:", language);
-    addTranscriptBreadcrumb(`Language detected: ${language}`, { language });
   }, [setSpokenLanguage, addTranscriptBreadcrumb]);
 
-  const handleSetLanguageContext = useCallback((doctorLang: string, patientLang: string) => {
-    const doctor = doctorLang.toLowerCase() as Language;
-    const patient = patientLang.toLowerCase() as Language;
-    setLanguageContext(doctor, patient);
-    console.log(`Language context set - Doctor: ${doctor}, Patient: ${patient}`);
-    addTranscriptBreadcrumb(`Language context set`, { doctor, patient });
+  const handleSetLanguageContext = useCallback(async (doctor: string, patient: string) => {
+    try {
+      if (!doctor || !patient) {
+        throw new Error("Invalid language context: both doctor and patient languages must be provided");
+      }
+      
+      const doctorLang = doctor.toLowerCase() as Language;
+      const patientLang = patient.toLowerCase() as Language;
+      
+      setLanguageContext(doctorLang, patientLang);
+      addTranscriptBreadcrumb(`Language context set`, { doctor: doctorLang, patient: patientLang });
+      return { success: true };
+    } catch (error) {
+      console.error("Error setting language context:", error);
+      addTranscriptBreadcrumb("Failed to set language context", { error: String(error) });
+      throw error; // Re-throw to be handled by the caller
+    }
   }, [setLanguageContext, addTranscriptBreadcrumb]);
 
-  const resetOnSpeechStart = useCallback((serverEvent: ServerEvent) => {
+  const resetLanguageState = useCallback(() => {
+    languageToolCalledRef.current = false;
+    setSpokenLanguage("unknown");
+  }, [setSpokenLanguage]);
+
+  const handleSpeechStart = useCallback((serverEvent: ServerEvent) => {
     if (serverEvent.type === "input_audio_buffer.speech_started") {
       console.log("New speech detected. Resetting language detection state.");
-      languageToolCalledRef.current = false;
-      setSpokenLanguage("unknown");
+      resetLanguageState();
       appendLanguageDetectionPrompt();
     }
-  }, [appendLanguageDetectionPrompt, setSpokenLanguage]);
+  }, [resetLanguageState, appendLanguageDetectionPrompt]);
 
-  const handleFunctionCall = useCallback(
-    async (functionCallParams: {
-      name: string;
-      call_id?: string;
-      arguments: string;
-    }) => {
-      const args = JSON.parse(functionCallParams.arguments);
-      const currentAgent = selectedAgentConfigSet?.find(
-        (a) => a.name === selectedAgentNameRef.current
+  const handleFunctionCall = async (functionCallParams: {
+    name: string;
+    call_id?: string;
+    arguments: string;
+  }) => {
+    const args = JSON.parse(functionCallParams.arguments);
+    const currentAgent = selectedAgentConfigSet?.find(
+      (a) => a.name === selectedAgentNameRef.current
+    );
+
+    addTranscriptBreadcrumb(`function call: ${functionCallParams.name}`, args);
+    if (currentAgent?.toolLogic?.[functionCallParams.name]) {
+      const fn = currentAgent.toolLogic[functionCallParams.name];
+      const fnResult = await fn(args, transcriptItems);
+
+      switch (functionCallParams.name) {
+        case 'surgicalScribeTool': {
+          console.log('🔄 Switching to Surgical Scribe display mode');
+          const patientContent = fnResult.messages?.[0]?.content;
+          if (patientContent) {
+            setPatientData({ content: patientContent });
+          } else {
+            console.error("No content found in surgicalScribeTool result");
+          }
+          break;
+        }
+
+        case 'updateSurgicalReportTool': {
+          console.log("🔄 Surgical Editor update received");
+          const updateText = args.updateText;
+          if (updateText) {
+            setPatientData({ content: updateText });
+          } else {
+            console.error("No update text provided in updateSurgicalReportTool call");
+          }
+          break;
+        }
+
+        case 'setLanguageFlag': {
+          const result = await handleSetLanguageFlag(args.language);
+          if (result.success) {
+            break;
+          } else {
+            console.error("Failed to set language flag:", result.reason);
+            addTranscriptBreadcrumb("Failed to set language flag", { reason: result.reason });
+            return;
+          }
+        }
+
+        case 'setLanguageContext': {
+          console.log("🔄 Setting language context");
+          const { doctorLanguage, patientLanguage } = args;
+          if (!doctorLanguage || !patientLanguage) {
+            console.error("Missing language parameters in setLanguageContext call");
+            return;
+          }
+          try {
+            // Set the language context (now async)
+            await handleSetLanguageContext(doctorLanguage, patientLanguage);
+            
+            // Then execute the tool logic (async operation)
+            const result = await currentAgent.toolLogic["setLanguageContext"](args, transcriptItems);
+            
+            // Verify the language context was set correctly
+            if (!result || result.error) {
+              throw new Error(result?.error || 'Failed to set language context');
+            }
+            
+            // Log success
+            console.log("🌐 Language Context Updated:", { doctorLanguage, patientLanguage });
+            
+            // Append parallel agents prompt (async operation)
+            await appendParallelAgentsPrompt(doctorLanguage, patientLanguage);
+            console.log("✅ Parallel agents prompt appended with verified language context");
+          } catch (error) {
+            console.error("Error in language context setup:", error);
+            addTranscriptBreadcrumb("Error setting language context", { 
+              error: String(error),
+              phase: "context_setup"
+            });
+          }
+          break;
+        }
+
+        case 'startParallelAgents': {
+          console.log("🔄 Starting parallel agents");
+          const { doctorLanguage, patientLanguage } = args;
+          if (!doctorLanguage || !patientLanguage) {
+            console.error("Missing language parameters in startParallelAgents call");
+            return;
+          }
+          try {
+            setParallelConnection(true);
+            const result = await currentAgent.toolLogic["startParallelAgents"](args, transcriptItems);
+            addTranscriptBreadcrumb(`Parallel agents started`, { doctorLanguage, patientLanguage });
+            console.log("🌐 Parallel Agents Started:", { doctorLanguage, patientLanguage });
+            appendInterpreterTransferPrompt();
+          } catch (error) {
+            console.error("Error starting parallel agents:", error);
+            addTranscriptBreadcrumb("Error starting parallel agents", { error: String(error) });
+          }
+          break;
+        }
+
+        default: {
+          addTranscriptBreadcrumb(
+            `function call result: ${functionCallParams.name}`,
+            fnResult
+          );
+    
+          sendClientEvent({
+            type: "conversation.item.create",
+            item: {
+              type: "function_call_output",
+              call_id: functionCallParams.call_id,
+              output: JSON.stringify(fnResult),
+            },
+          });
+          sendClientEvent({ type: "response.create" });
+        }
+      }
+    }
+    else if (functionCallParams.name === "transferAgents") {
+      const destinationAgent = args.destination_agent;
+      const newAgentConfig =
+        selectedAgentConfigSet?.find((a) => a.name === destinationAgent) || null;
+      if (newAgentConfig) {
+        setSelectedAgentName(destinationAgent);
+      }
+      const functionCallOutput = {
+        destination_agent: destinationAgent,
+        did_transfer: !!newAgentConfig,
+      };
+      sendClientEvent({
+        type: "conversation.item.create",
+        item: {
+          type: "function_call_output",
+          call_id: functionCallParams.call_id,
+          output: JSON.stringify(functionCallOutput),
+        },
+      });
+      addTranscriptBreadcrumb(
+        `function call: ${functionCallParams.name} response`,
+        functionCallOutput
+      );
+    }
+    else {
+      // Handle functions without tool logic
+      const simulatedResult = { result: true };
+      addTranscriptBreadcrumb(
+        `function call fallback: ${functionCallParams.name}`,
+        simulatedResult
       );
 
-      addTranscriptBreadcrumb(`function call: ${functionCallParams.name}`, args);
-
-      if (currentAgent?.toolLogic?.[functionCallParams.name]) {
-        const fn = currentAgent.toolLogic[functionCallParams.name];
-        const fnResult = await fn(args, transcriptItems);
-
-        switch (functionCallParams.name) {
-          case 'surgicalScribeTool': {
-            console.log('🔄 Switching to Surgical Scribe display mode');
-            const patientContent = fnResult.messages?.[0]?.content;
-            if (patientContent) {
-              setPatientData({ content: patientContent });
-            } else {
-              console.error("No content found in surgicalScribeTool result");
-            }
-            break;
-          }
-
-          case 'updateSurgicalReportTool': {
-            console.log("🔄 Surgical Editor update received");
-            const updateText = args.updateText;
-            if (updateText) {
-              setPatientData({ content: updateText });
-            } else {
-              console.error("No update text provided in updateSurgicalReportTool call");
-            }
-            break;
-          }
-
-          case 'setLanguageFlag': {
-            handleSetLanguageFlag(args.language, args.confidence);
-            break;
-          }
-
-          case 'setLanguageContext': {
-            console.log("🔄 Setting language context");
-            const { doctorLanguage, patientLanguage } = args;
-            if (!doctorLanguage || !patientLanguage) {
-              console.error("Missing language parameters in setLanguageContext call");
-              return;
-            }
-            try {
-              handleSetLanguageContext(doctorLanguage, patientLanguage);
-              const result = await currentAgent.toolLogic["setLanguageContext"](args, transcriptItems);
-              addTranscriptBreadcrumb(`Language context set`, { doctorLanguage, patientLanguage });
-              console.log("🌐 Language Context Updated:", { doctorLanguage, patientLanguage });
-              appendParallelAgentsPrompt(doctorLanguage, patientLanguage);
-            } catch (error) {
-              console.error("Error setting language context:", error);
-              addTranscriptBreadcrumb("Error setting language context", { error: String(error) });
-            }
-            break;
-          }
-
-          case 'startParallelAgents': {
-            console.log("🔄 Starting parallel agents");
-            const { doctorLanguage, patientLanguage } = args;
-            if (!doctorLanguage || !patientLanguage) {
-              console.error("Missing language parameters in startParallelAgents call");
-              return;
-            }
-            try {
-              setParallelConnection(true);
-              const result = await currentAgent.toolLogic["startParallelAgents"](args, transcriptItems);
-              addTranscriptBreadcrumb(`Parallel agents started`, { doctorLanguage, patientLanguage });
-              console.log("🌐 Parallel Agents Started:", { doctorLanguage, patientLanguage });
-              appendInterpreterTransferPrompt();
-            } catch (error) {
-              console.error("Error starting parallel agents:", error);
-              addTranscriptBreadcrumb("Error starting parallel agents", { error: String(error) });
-            }
-            break;
-          }
-
-          case 'transferAgents': {
-            const destinationAgent = args.destination_agent;
-            const newAgentConfig =
-              selectedAgentConfigSet?.find((a) => a.name === destinationAgent) || null;
-            if (newAgentConfig) {
-              setSelectedAgentName(destinationAgent);
-            }
-            const functionCallOutput = {
-              destination_agent: destinationAgent,
-              did_transfer: !!newAgentConfig,
-            };
-            sendClientEvent({
-              type: "conversation.item.create",
-              item: {
-                type: "function_call_output",
-                call_id: functionCallParams.call_id,
-                output: JSON.stringify(functionCallOutput),
-              },
-            });
-            addTranscriptBreadcrumb(
-              `function call: ${functionCallParams.name} response`,
-              functionCallOutput
-            );
-            break;
-          }
-
-          default: {
-            const simulatedResult = { result: true };
-            addTranscriptBreadcrumb(
-              `function call fallback: ${functionCallParams.name}`,
-              simulatedResult
-            );
-          }
-        }
-
-        // Handle common event creation for all cases
-        addTranscriptBreadcrumb(
-          `function call result: ${functionCallParams.name}`,
-          fnResult
-        );
-
-        sendClientEvent({
-          type: "conversation.item.create",
-          item: {
-            type: "function_call_output",
-            call_id: functionCallParams.call_id,
-            output: JSON.stringify(fnResult),
-          },
-        });
-        sendClientEvent({ type: "response.create" });
-      } else if (functionCallParams.name === "transferAgents") {
-        const destinationAgent = args.destination_agent;
-        const newAgentConfig =
-          selectedAgentConfigSet?.find((a) => a.name === destinationAgent) || null;
-        if (newAgentConfig) {
-          setSelectedAgentName(destinationAgent);
-        }
-        const functionCallOutput = {
-          destination_agent: destinationAgent,
-          did_transfer: !!newAgentConfig,
-        };
-        sendClientEvent({
-          type: "conversation.item.create",
-          item: {
-            type: "function_call_output",
-            call_id: functionCallParams.call_id,
-            output: JSON.stringify(functionCallOutput),
-          },
-        });
-        addTranscriptBreadcrumb(
-          `function call: ${functionCallParams.name} response`,
-          functionCallOutput
-        );
-      } else {
-        const simulatedResult = { result: true };
-        addTranscriptBreadcrumb(
-          `function call fallback: ${functionCallParams.name}`,
-          simulatedResult
-        );
-
-        sendClientEvent({
-          type: "conversation.item.create",
-          item: {
-            type: "function_call_output",
-            call_id: functionCallParams.call_id,
-            output: JSON.stringify(simulatedResult),
-          },
-        });
-        sendClientEvent({ type: "response.create" });
-      }
-    },
-    [
-      selectedAgentConfigSet,
-      selectedAgentName,
-      sendClientEvent,
-      setSelectedAgentName,
-      toggleGlobalFlag,
-      transcriptItems,
-      addTranscriptBreadcrumb,
-      addTranscriptMessage,
-      handleSetLanguageFlag,
-      handleSetLanguageContext,
-    ]
-  );
+      sendClientEvent({
+        type: "conversation.item.create",
+        item: {
+          type: "function_call_output",
+          call_id: functionCallParams.call_id,
+          output: JSON.stringify(simulatedResult),
+        },
+      });
+      sendClientEvent({ type: "response.create" });
+    }
+  };
 
   return useCallback(
     (serverEvent: ServerEvent) => {
@@ -348,7 +355,7 @@ export function useHandleServerEvent({
       logServerEvent(serverEvent);
 
       if (selectedAgentNameRef.current === "interpreterCoordinator") {
-        resetOnSpeechStart(serverEvent);
+        handleSpeechStart(serverEvent);
         if (
           serverEvent.type === "conversation.item.created" &&
           serverEvent.item?.role === "assistant"
@@ -379,20 +386,6 @@ export function useHandleServerEvent({
             console.log("Discarding empty output from interpreterCoordinator.");
             return;
           }
-        }
-        // Also, if any audio-related events come in, discard them.
-        if (
-          serverEvent.type === "response.audio_transcript.delta" ||
-          serverEvent.type === "response.audio_transcript.done" ||
-          serverEvent.type === "response.audio.delta" ||
-          serverEvent.type === "response.audio.done"
-        ) {
-          console.log("Discarding audio event for interpreterCoordinator.");
-          return;
-        }
-        if (serverEvent.type === "response.create") {
-          console.log("Discarding response.create event for interpreterCoordinator.");
-          return;
         }
       }
       

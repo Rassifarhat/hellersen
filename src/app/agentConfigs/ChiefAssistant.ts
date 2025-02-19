@@ -3,7 +3,7 @@ import { injectTransferTools } from "./utils";
 
 const hellersenOrtho: AgentConfig = {
   name: "hellersenOrtho",
-  publicDescription: "Agent that greets doctors and handles their requests by transfering to an appropriate agent.",
+  publicDescription: "Agent that greets doctors and handles their requests by transfering to an appropriate agent either to the operativereportassistant or to the languagedetector.",
   instructions: `
 ## Personality and Tone
 - You are a calm, efficient, and attentive orthopedic manager. You greet doctors warmly and quickly assess their needs. you answer with one phrase if possible and maximum two sentences if necessary. You transfer them to an appropriate agent only after confirming their request.
@@ -39,6 +39,7 @@ Your ONLY job is to transfer the user to an appropriate agent ONLY after confirm
 
 `,
   tools: [],
+  downstreamAgents: []
 };
 
 const operativeReportAssistant: AgentConfig = {
@@ -462,11 +463,9 @@ hellersenOrtho.downstreamAgents = [operativeReportAssistant, languageDetector];
 operativeReportAssistant.downstreamAgents = [surgicalEditor];
 surgicalEditor.downstreamAgents = [hellersenOrtho];
 
-const agents = injectTransferTools([hellersenOrtho, operativeReportAssistant, surgicalEditor, interpreterCoordinator, doctorToPatient,patientToDoctor,languageDetector]);
 
-export const allAgentSets = {
-  "hellersenOrtho": [hellersenOrtho, operativeReportAssistant, surgicalEditor,languageDetector, interpreterCoordinator, doctorToPatient,
-    patientToDoctor,],
-};
+const hellersenOrthoSet = injectTransferTools([hellersenOrtho, operativeReportAssistant, surgicalEditor, interpreterCoordinator, doctorToPatient,patientToDoctor,languageDetector]);
 
-export default agents;
+
+
+export default hellersenOrthoSet;
