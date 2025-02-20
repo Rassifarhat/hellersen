@@ -6,13 +6,14 @@ import { useEvent } from "@/app/contexts/EventContext";
 import { useRef, useCallback, useEffect } from "react";
 import { allAgentSets } from "@/app/agentConfigs";
 import { usePatientData } from "@/app/contexts/PatientDataContext";
+import { v4 as uuidv4 } from 'uuid';
 
 
 export interface UseHandleServerEventParams {
   setSessionStatus: (status: SessionStatus) => void;
   selectedAgentName: string;
   selectedAgentConfigSet: AgentConfig[] | null;
-  sendClientEvent: (eventObj: any, eventNameSuffix?: string) => void;
+  sendClientEvent: (eventObj: any, eventNameSuffix?: string, hiddenMessage?: string) => void;
   setSelectedAgentName: (name: string) => void;
   shouldForceResponse?: boolean;
   toggleGlobalFlag: () => void;
@@ -38,14 +39,36 @@ export function useHandleServerEvent({
   } = useTranscript();
 
   const { logServerEvent } = useEvent();
-  
-const selectedAgentNameRef = useRef(selectedAgentName);
-useEffect(() => {
-  selectedAgentNameRef.current = selectedAgentName;
-}, [selectedAgentName]);
 
-const { setPatientData } = usePatientData();
+  const appendHiddenSystemMessage = useCallback(async (text: string) => {
+    try {
+      const systemMessage = {
+        type: "conversation.item.create",
+        item: {
+          id: `sys-${uuidv4()}`,
+          role: "system",
+          hidden: true,
+          content: [
+            {
+              type: "text",
+              text: text
+            },
+          ],
+        },
+      };
+      sendClientEvent(systemMessage);
+      console.log("Appended hidden system message:", systemMessage);
+    } catch (error) {
+      console.error("Error appending hidden system message:", error);
+    }
+  }, [sendClientEvent]);
 
+  const selectedAgentNameRef = useRef(selectedAgentName);
+  useEffect(() => {
+    selectedAgentNameRef.current = selectedAgentName;
+  }, [selectedAgentName]);
+
+  const { setPatientData } = usePatientData();
 
   const handleFunctionCall = useCallback(
     async (functionCallParams: {
@@ -65,7 +88,7 @@ const { setPatientData } = usePatientData();
         const fnResult = await fn(args, transcriptItems);
 
         if (functionCallParams.name === 'surgicalScribeTool') {
-          console.log('🔄 Switching to Surgical Scribe display mode');
+          console.log(' Switching to Surgical Scribe display mode');
           const patientContent = fnResult.messages?.[0]?.content;
           if (patientContent) {
             setPatientData({ content: patientContent });
@@ -74,8 +97,10 @@ const { setPatientData } = usePatientData();
           }
         }
         else if (functionCallParams.name === "updateSurgicalReportTool") {
-          console.log("🔄 Surgical Editor update received");
+          console.log(" Surgical Editor update received");
           const updateText = args.updateText;
+          // Fire and forget - don't await
+          appendHiddenSystemMessage('do not forget to transfer to chiefAssistant immediately after sending the email').catch(console.error);
           if (updateText) {
               setPatientData({ content: updateText });
           } else {

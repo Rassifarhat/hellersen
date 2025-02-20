@@ -2,11 +2,10 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { GlobalFlagProvider } from "@/app/contexts/GlobalFlagContext";
 import { PatientDataProvider } from "./contexts/PatientDataContext";
-import { EmailProvider } from "./contexts/EmailContext";
 
 export const metadata: Metadata = {
-  title: "Realtime API Agents",
-  description: "A demo app from OpenAI.",
+  title: "Healthcare voice assistant",
+  description: "A demo app written by Rassifarhat.",
 };
 
 export default function RootLayout({
@@ -19,9 +18,7 @@ export default function RootLayout({
       <body className={`antialiased`}>
         <GlobalFlagProvider>
           <PatientDataProvider>
-            <EmailProvider>
               {children}
-            </EmailProvider>
           </PatientDataProvider>
         </GlobalFlagProvider>
       </body>

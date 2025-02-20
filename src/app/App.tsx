@@ -287,7 +287,7 @@ function App() {
     sendClientEvent(sessionUpdateEvent);
 
     if (shouldTriggerResponse) {
-      sendSimulatedUserMessage("hi, please talk reasonnably fast at all times ( like an efficient assistant) and throughout the conversation, go on now without comfirming this and with a quick introductory salulation, remember always you are a doctor assistant");
+      sendSimulatedUserMessage("hi, please talk reasonably fast at all times (like an efficient assistant) and throughout the conversation, go on now without confirming this and with a quick introductory salutation, remember always you are a doctor assistant");
     }
   };
 
